@@ -1,30 +1,36 @@
-// JARVIS — orquestrador da interface.
-// Fluxo: PALMAS/MIC/TEXTO → OUVIDO → CÉREBRO (servidor) → AÇÃO/RESPOSTA → VOZ + INTERFACE
+// JARVIS — orquestrador da interface (navegador).
+// Fluxo: PALMAS/MIC/TEXTO → OUVIDO → CÉREBRO (servidor) → RESULTADO → VOZ + INTERFACE.
+// A lógica de negócio fica no servidor; aqui só há entrada, saída e estado.
 import { bus, EVENTS } from './core/bus.js';
 import { api, serverEvents } from './core/api.js';
 import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
-import { listenOnce, stopListening, hearingSupported, setWakeWord, isListening } from './modules/hearing.js';
-import { speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking } from './modules/voice.js';
-import { startClap, stopClap, pauseClap, resumeClap, configureClap, clapStatus } from './modules/clap.js';
+import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
+import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn } from './modules/hearing.js';
+import { speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
+import { wake } from './modules/wake/index.js';
+import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
 import { $, $$, esc, toast, relTime } from './ui/dom.js';
 import { closeSheet, currentSheet } from './ui/sheet.js';
 import { showBible, renderBibleMini, bibleActions, pageSize } from './ui/bible-reader.js';
 import { showNews, showStory } from './ui/news-panel.js';
-import { showMemory, showSettings, showDiagnostics, showModules, showHouse, showMenu } from './ui/panels.js';
+import { showMemory, showSettings, showModules, showHouse, showMenu } from './ui/panels.js';
+import { showDiagnostics, runSelfTest } from './ui/diagnostics.js';
 
 const sessionId = (() => { try { let id = sessionStorage.getItem('jarvis.session'); if (!id) { id = crypto.randomUUID(); sessionStorage.setItem('jarvis.session', id); } return id; } catch { return 'default'; } })();
 const startedAt = Date.now();
+const isAndroid = /Android/i.test(navigator.userAgent);
 const history = []; // memória de sessão exibida no painel
 let core;
 let busy = false;
 let lastStatus = null;
-let offlineNotified = false;
+let serverReachable = true;
+let statusTimer = null;
 
-// ------------------------------------------------------------ transcrição
+// ============================================================ transcrição
 function addMsg(role, text, { tag, confirm } = {}) {
   const box = $('#transcript');
   const p = document.createElement('p');
@@ -33,8 +39,8 @@ function addMsg(role, text, { tag, confirm } = {}) {
   if (tag) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = tag; p.appendChild(t); }
   if (confirm) {
     const div = document.createElement('div'); div.className = 'confirm-actions';
-    for (const [label, say] of [['Sim, confirmar', 'sim'], ['Cancelar', 'não']]) {
-      const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', () => { div.remove(); handleInput(say, 'text'); }); div.appendChild(b);
+    for (const [label, answer] of [['Sim, confirmar', 'sim'], ['Cancelar', 'não']]) {
+      const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', () => { div.remove(); handleInput(answer, 'text'); }); div.appendChild(b);
     }
     p.appendChild(div);
   }
@@ -54,54 +60,91 @@ function recentCommand(intent, module, ok = true) {
   while (ol.children.length > 12) ol.lastChild.remove();
 }
 
-// ------------------------------------------------------------ fala
+// ============================================================ voz
+/** Fala, com possibilidade de interrupção por "pare" (voz) ou duas palmas. */
 async function say(text) {
   const s = getSettings();
-  if (!text || !s?.voice?.enabled) return;
+  if (!text || !s?.voice?.enabled || s.voice.silent) return;
   setState('speaking');
-  await pauseClap();
-  await speak(text);
+  const speaking = speak(text);
+  // Interrupção por voz (só depois que a fala começou). No Android, só se as
+  // palmas estiverem desligadas — o microfone é um só.
+  const barge = s.voice.bargeIn && hearingSupported && !(isAndroid && s.clap.enabled)
+    ? startBargeIn({ lang: s.hearing.lang, onStop: () => { stopSpeaking(); setState('standby'); }, onPause: () => togglePause() }) : null;
+  await speaking;
+  barge?.(); stopBargeIn();
   if (getState() === 'speaking') setState('standby');
-  resumeClap(getSettings()?.clap);
 }
 
-// ------------------------------------------------------------ cérebro
+function togglePause() {
+  if (isPaused()) { resumeSpeaking(); document.body.classList.remove('speech-paused'); setState('speaking'); }
+  else if (pauseSpeaking()) { document.body.classList.add('speech-paused'); setState('standby', 'FALA PAUSADA'); }
+}
+function stopAll() { stopSpeaking(); stopBargeIn(); document.body.classList.remove('speech-paused'); setState('standby'); }
+
+// ============================================================ cérebro
+function clientInfo() {
+  return { mic: micStatus(), hearing: hearingSupported, voice: voiceSupported, notifications: notificationState() };
+}
+
 async function handleInput(text, source = 'text') {
   text = String(text || '').trim();
   if (!text) { setState('standby'); return; }
   if (busy) { toast('Aguarde, ainda estou processando…'); return; }
   busy = true;
-  stopSpeaking();
+  stopAll();
   addMsg('user', text);
   setState('thinking');
   const t0 = performance.now();
   let res;
   try {
-    res = await api.post('/api/input', { text, sessionId, pageSize: pageSize(), source }, { timeout: 90000 });
+    res = await api.post('/api/input', { text, sessionId, pageSize: pageSize(), source, client: clientInfo() }, { timeout: 90000 });
+    if (!serverReachable) { serverReachable = true; updateBanner(); }
   } catch (err) {
     busy = false;
-    setState('error', err.offline ? 'SEM SERVIDOR' : 'FALHA');
-    sounds.error();
-    addMsg('system', `⚠ ${err.message}`);
     clientLog('erro-cliente', `Falha ao enviar comando: ${err.message}`, 'warn');
-    if (err.offline) offlineHelp();
+    if (err.offline || err.timeout) { serverReachable = !err.offline; updateBanner(); return offlineFallback(text, err); }
+    setState('error', 'FALHA'); sounds.error();
+    addMsg('system', `⚠ ${err.message}`);
     return;
   }
   busy = false;
   $('#sys-latency').textContent = `${Math.round(performance.now() - t0)} ms`;
   $('#sys-tone').textContent = (res.tone || '—').toUpperCase();
   bus.emit(EVENTS.RESPONSE_RECEIVED, res);
-  if (res.intent) { bus.emit(EVENTS.COMMAND_DETECTED, res); recentCommand(res.intent, res.module, !res.error); }
+  if (res.intent) { bus.emit(EVENTS.COMMAND_DETECTED, res); recentCommand(res.intent, res.module, res.success !== false || /^conversation/.test(res.intent)); }
   addMsg('jarvis', res.text, { tag: res.module, confirm: res.awaitingConfirmation });
+  document.body.classList.toggle('silent', !!res.silent);
+  if (res.intent?.startsWith('system.silent')) { await refreshSettings(); }
   applyUi(res);
-  if (res.clientActions?.includes('stopSpeech')) { stopSpeaking(); setState('standby'); return; }
+  const actions = res.clientActions || [];
+  if (actions.includes('stopSpeech')) { stopAll(); return; }
+  if (actions.includes('pauseSpeech')) { togglePause(); return; }
+  if (actions.includes('resumeSpeech')) { if (isPaused()) togglePause(); return; }
   if (res.error) setState('error');
+  if (res.ui?.panel === 'selftest') { setState('standby', 'DIAGNÓSTICO'); return; }
   await say(res.speech);
-  // Conversa contínua: se o JARVIS fez uma pergunta, volta a ouvir.
   const s = getSettings();
   const asked = res.awaitingConfirmation || /\?\s*$/.test(res.text || '');
   if (source === 'voice' && s?.hearing?.continuousConversation && asked && !isSpeaking()) startListening({ chime: true });
   else if (getState() !== 'error') setState('standby');
+}
+
+/** Servidor inacessível: responde o que der localmente, sem fingir o resto. */
+function offlineFallback(text, err) {
+  const local = offlineAnswer(text);
+  const norm = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  let cachedBible = null;
+  try { cachedBible = /biblia|leitura|onde parei/.test(norm) ? JSON.parse(localStorage.getItem('jarvis.bible') || 'null') : null; } catch {}
+  if (local) { addMsg('jarvis', local, { tag: 'LOCAL' }); recentCommand('offline.local', 'LOCAL'); say(local); setState('standby', 'SERVIDOR OFFLINE'); return; }
+  if (cachedBible) {
+    showBible({ ...cachedBible, message: null });
+    const msg = `Servidor inacessível: mostrando a última página salva (${cachedBible.ref.label}, página ${cachedBible.pageIndex + 1}). Virar páginas e registrar progresso exige o servidor.`;
+    addMsg('jarvis', msg, { tag: 'LOCAL' }); setState('standby', 'SERVIDOR OFFLINE'); return;
+  }
+  setState('error', err.offline ? 'SEM SERVIDOR' : 'TEMPO ESGOTADO');
+  sounds.error();
+  addMsg('system', `⚠ ${err.message} ${OFFLINE_NOTICE}`);
 }
 
 function applyUi(res) {
@@ -115,30 +158,33 @@ function applyUi(res) {
     case 'memory': showMemory(history); refreshMemoryMini(); break;
     case 'settings': openSettings(); break;
     case 'diagnostics': showDiagnostics(); break;
+    case 'selftest': runSelfTest({ speakResult: (t) => { addMsg('jarvis', t, { tag: 'SISTEMA' }); return say(t); } }); break;
     case 'modules': showModules(); break;
     case 'house': showHouse(); break;
     default: break;
   }
 }
 
-// ------------------------------------------------------------ ouvido
+// ============================================================ ouvido
 async function startListening({ chime = true, greet = null } = {}) {
   if (!hearingSupported) {
     addMsg('system', 'Reconhecimento de voz não suportado neste navegador (use Chrome, Edge ou Android). Você pode digitar.');
     $('#command-input').focus();
     return;
   }
+  if (!window.isSecureContext) { addMsg('system', '⚠ O microfone exige HTTPS (ou localhost). Veja “Usar no Android” no README.'); return; }
   if (isListening()) { stopListening(); setState('standby'); return; }
-  stopSpeaking();
-  await pauseClap();
+  stopAll();
+  await wake?.pause();
   if (greet) await say(greet);
   if (chime) sounds.activate();
-  setState('listening');
+  // Só mostra OUVINDO quando o navegador confirmar (evento LISTEN_STARTED).
+  setState('standby', 'ATIVANDO MICROFONE');
   const s = getSettings();
   try {
     const text = await listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
     $('#interim').textContent = '';
-    if (!text) { setState('standby'); resumeClap(s?.clap); return; }
+    if (!text) { setState('standby'); return; }
     clientLog('ouvido', `Transcrição recebida (${text.length} caracteres)`);
     bus.emit(EVENTS.VOICE_RECEIVED, { text });
     await handleInput(text, 'voice');
@@ -148,11 +194,14 @@ async function startListening({ chime = true, greet = null } = {}) {
     sounds.error();
     addMsg('system', `⚠ ${err.message}`);
   } finally {
-    resumeClap(getSettings()?.clap);
+    wake?.resume(getSettings());
     updateChips();
   }
 }
 
+bus.on(EVENTS.LISTEN_STARTED, () => setState('listening'));
+bus.on('mic:set', (s) => setMicState(s));
+bus.on('mic:state', () => updateChips());
 bus.on(EVENTS.VOICE_INTERIM, ({ text }) => { $('#interim').textContent = text; core?.pulse(0.25); });
 bus.on(EVENTS.SPEECH_BOUNDARY, () => core?.pulse(0.35));
 bus.on(EVENTS.STATE_CHANGED, ({ next }) => { core?.setState(next); updateChips(); });
@@ -162,106 +211,120 @@ bus.on(EVENTS.CLAP_LEVEL, ({ peak, threshold }) => {
 });
 bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 bus.on(EVENTS.DOUBLE_CLAP, () => {
+  if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
   startListening({ chime: false, greet: 'Sim?' });
 });
-// Ativação por voz ("Jarvis, ...")
-bus.on(EVENTS.VOICE_RECEIVED, ({ text, wake }) => {
-  if (!wake) return;
+bus.on(EVENTS.VOICE_RECEIVED, ({ text, wake: isWake }) => {
+  if (!isWake) return;
   if (text && text.length > 1) handleInput(text, 'voice'); else startListening({ chime: false, greet: 'Sim?' });
 });
 bus.on('bible:message', (msg) => { addMsg('jarvis', msg, { tag: 'BÍBLIA' }); if (/concluíd/.test(msg)) say(msg); });
-bus.on(EVENTS.BIBLE_OPENED, (v) => renderBibleMini(v));
+bus.on(EVENTS.BIBLE_OPENED, (v) => { renderBibleMini(v); try { if (v && !v.error) localStorage.setItem('jarvis.bible', JSON.stringify(v)); } catch {} });
+bus.on('sheet:open', () => core?.setCovered(window.innerWidth <= 820));
+bus.on('sheet:close', () => core?.setCovered(false));
 
-// ------------------------------------------------------------ status / módulos
-function chip(id, cls) { const el = $(id); el.classList.remove('ok', 'warn', 'bad', 'active'); if (cls) el.classList.add(...cls.split(' ')); }
+// ============================================================ status / módulos
+function chip(id, cls, title) { const el = $(id); el.classList.remove('ok', 'warn', 'bad', 'active'); if (cls) el.classList.add(...cls.split(' ')); if (title) el.title = title; }
 function updateChips() {
-  const online = navigator.onLine && lastStatus?.online !== false;
-  chip('#chip-net', online ? 'ok' : 'bad');
-  chip('#chip-ai', lastStatus?.llm?.configured ? (online ? 'ok' : 'warn') : 'warn');
-  chip('#chip-mic', isListening() ? 'ok active' : hearingSupported ? '' : 'bad');
-  const c = clapStatus();
-  chip('#chip-clap', c.running ? 'ok' : c.enabled ? 'warn' : '');
+  const internet = navigator.onLine && lastStatus?.online !== false;
+  chip('#chip-net', !serverReachable ? 'bad' : internet ? 'ok' : 'warn', !serverReachable ? 'Servidor inacessível' : internet ? 'Online' : 'Modo offline');
+  chip('#chip-ai', lastStatus?.llm?.configured ? (internet ? 'ok' : 'warn') : 'warn', lastStatus?.llm?.configured ? `IA: ${lastStatus.llm.providerName} · ${lastStatus.llm.model}` : 'IA não configurada (modo local)');
+  const mic = micStatus();
+  chip('#chip-mic', isListening() ? 'ok active' : mic === 'denied' || mic === 'unavailable' || !hearingSupported ? 'bad' : '', `Microfone: ${MIC_LABEL[mic]}${hearingSupported ? '' : ' · reconhecimento indisponível'}`);
+  const ws = wake?.status() || {};
+  chip('#chip-clap', ws.clap?.running ? 'ok' : ws.clap?.enabled ? 'warn' : '', ws.detail);
+  document.body.classList.toggle('silent', !!getSettings()?.voice?.silent);
   $('#sys-mode').textContent = `${getSettings()?.security?.safeMode ? 'SEGURO · ' : ''}${getSettings()?.ui?.mode === 'economico' ? 'ECONÔMICO' : 'DESEMPENHO'}`;
+}
+
+function updateBanner() {
+  const b = $('#banner');
+  if (!serverReachable) { b.className = 'banner server'; b.textContent = '⚠ SERVIDOR INACESSÍVEL — FUNÇÕES LOCAIS'; b.hidden = false; }
+  else if (!navigator.onLine || lastStatus?.online === false) { b.className = 'banner offline'; b.textContent = '📡 MODO OFFLINE'; b.hidden = false; }
+  else b.hidden = true;
+  updateChips();
 }
 
 function renderModules(status) {
   const grid = $('#module-grid');
-  grid.innerHTML = status.modules.map((m) => `<li data-module="${esc(m.id)}" title="${esc(m.info)}"><span class="m-name"><i class="m-dot ${esc(m.status)}"></i>${esc(m.name)}</span><span class="m-last">${m.last ? `${esc(m.last.event)} · ${relTime(m.last.at)}` : esc(m.info.split('.')[0])}</span></li>`).join('');
+  grid.innerHTML = status.modules.map((m) => `<li data-module="${esc(m.id)}" title="${esc(m.info)}" tabindex="0"><span class="m-name"><i class="m-dot ${esc(m.status)}"></i>${esc(m.name)}</span><span class="m-last">${m.last ? `${esc(m.last.event)} · ${relTime(m.last.at)}` : esc(m.info.split('.')[0])}</span></li>`).join('');
   $$('li', grid).forEach((li) => li.addEventListener('click', () => {
     const id = li.dataset.module;
-    ({ biblia: () => handleInput('Bíblia'), noticias: () => handleInput('Notícias'), memoria: () => showMemory(history), casa: showHouse, sistema: showDiagnostics, palmas: openSettings, voz: openSettings, ouvido: openSettings }[id] || showModules)();
+    ({ biblia: () => handleInput('Bíblia'), noticias: () => handleInput('Notícias'), memoria: () => showMemory(history), tarefas: () => showMemory(history), casa: showHouse, sistema: showDiagnostics, cerebro: showDiagnostics, palmas: openSettings, voz: openSettings, ouvido: openSettings }[id] || showModules)();
   }));
 }
 
 async function refreshStatus() {
   try {
     lastStatus = await api.get('/api/status', { timeout: 15000 });
+    serverReachable = true;
     renderModules(lastStatus);
     const ol = $('#recent-commands');
     if (ol.querySelector('.muted') && lastStatus.recentCommands.length) {
       ol.innerHTML = '';
       lastStatus.recentCommands.slice(0, 10).reverse().forEach((c) => recentCommand(c.name, c.module, c.ok));
     }
-    if (!lastStatus.online && !offlineNotified) offlineHelp();
-    if (lastStatus.online) offlineNotified = false;
-  } catch (err) {
-    lastStatus = { ...(lastStatus || {}), online: false };
-    if (!offlineNotified) offlineHelp(true);
-  }
-  updateChips();
+  } catch { serverReachable = false; }
+  updateBanner();
 }
 
-function offlineHelp(serverDown = false) {
-  offlineNotified = true;
-  addMsg('system', serverDown
-    ? '⚠ Servidor do JARVIS inacessível. A interface continua aberta, mas comandos precisam do servidor rodando (npm start).'
-    : '⚠ Sem internet. Continuam funcionando: hora, data, contas, conversões, cálculos de motor, memória, tarefas, Bíblia já baixada e a voz. Ficam indisponíveis: conversa com a IA, notícias, câmbio, combustíveis e (no Chrome) o reconhecimento de voz — use o texto.');
+async function refreshSettings() {
+  try { applyServerSettings(await api.get('/api/settings')); applySettings(getSettings()); } catch {}
 }
 
 async function refreshMemoryMini() {
   try {
-    const m = await api.get('/api/memory');
-    const items = [...m.facts.map((x) => ['FATO', x]), ...m.preferences.map((x) => ['PREFERÊNCIA', x]), ...m.tasks.filter((t) => !t.done).map((x) => ['TAREFA', x])].slice(-8).reverse();
-    $('#mem-mini').innerHTML = items.length ? items.map(([k, x]) => `<li><small>${k}</small>${esc(x.text)}</li>`).join('') : '<li class="muted">Sem memórias.</li>';
+    const [m, t] = await Promise.all([api.get('/api/memory'), api.get('/api/tasks')]);
+    const items = [...m.facts.map((x) => ['MEMÓRIA', x]), ...m.preferences.map((x) => ['PREFERÊNCIA', x]), ...t.tasks.map((x) => [x.dueAt ? `LEMBRETE · ${new Date(x.dueAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : 'TAREFA', x])].slice(-8).reverse();
+    $('#mem-mini').innerHTML = items.length ? items.map(([k, x]) => `<li><small>${esc(k)}</small>${esc(x.text)}</li>`).join('') : '<li class="muted">Sem memórias.</li>';
   } catch {}
 }
 
-// ------------------------------------------------------------ configurações
+// ============================================================ configurações
 function applySettings(s, changedKey) {
   if (!s) return;
   document.body.dataset.theme = s.ui.theme;
-  document.body.classList.toggle('eco', s.ui.mode === 'economico');
+  const eco = s.ui.mode === 'economico';
+  document.body.classList.toggle('eco', eco);
   document.body.classList.toggle('no-anim', !s.ui.animations);
-  core?.configure({ eco: s.ui.mode === 'economico', particles: s.ui.particles, animations: s.ui.animations });
+  core?.configure({ eco, particles: s.ui.particles, animations: s.ui.animations });
   configureVoice({ rate: s.voice.rate, volume: s.voice.volume, pitch: s.voice.pitch, lang: s.voice.lang, voiceName: s.voice.voiceName });
-  configureClap(s.clap);
-  if (changedKey === 'clap.enabled' || changedKey === 'boot') {
-    if (s.clap.enabled) startClap(s.clap).then(() => { toast('👏 Palmas ativas: bata duas vezes para me chamar.'); updateChips(); }).catch((e) => { toast(e.message); saveSettings({ clap: { enabled: false } }); });
-    else if (changedKey !== 'boot') stopClap().then(updateChips);
+  wake?.configure(s);
+  // Modo econômico: menos atualizações de status.
+  clearInterval(statusTimer); statusTimer = setInterval(refreshStatus, eco ? 180000 : 60000);
+  if (changedKey === 'clap.enabled') {
+    wake?.setClapEnabled(s.clap.enabled, s).then(() => { if (s.clap.enabled) toast('👏 Palmas ativas: bata duas vezes para me chamar. Mantenha o JARVIS aberto.'); updateChips(); })
+      .catch((e) => { toast(e.message); saveSettings({ clap: { enabled: false } }); });
   }
-  if (changedKey === 'hearing.wakeWord' || changedKey === 'boot') setWakeWord(s.hearing.wakeWord, { lang: s.hearing.lang, name: s.hearing.wakeWordName });
-  if (changedKey === 'test-voice') say('Olá. Esta é a minha voz atual.');
+  if (changedKey === 'hearing.wakeWord') wake?.setWakeWord(s.hearing.wakeWord, s);
+  if (changedKey === 'ui.keepAwake' || changedKey === 'boot') setKeepAwake(!!s.ui.keepAwake).then((ok) => { if (s.ui.keepAwake && !ok) toast('Este navegador não permite manter a tela ligada.'); });
+  if (changedKey === 'voice.silent' && s.voice.silent) stopAll();
+  if (changedKey === 'test-voice') { if (s.voice.silent) toast('Modo silencioso ativo.'); else say('Olá. Esta é a minha voz atual.'); }
   updateChips();
 }
 function openSettings() { showSettings({ onChange: (s, key) => applySettings(s, key) }); }
 
-// ------------------------------------------------------------ eventos de interface
+// ============================================================ eventos de interface
 $('#command-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('#command-input');
   const v = input.value; input.value = '';
   handleInput(v, 'text');
 });
-$('#mic-btn').addEventListener('click', () => startListening());
-$('#dock-mic').addEventListener('click', () => startListening());
-$('#sheet-mic').addEventListener('click', () => startListening());
-$('#core-button').addEventListener('click', () => (isSpeaking() ? (stopSpeaking(), setState('standby')) : startListening()));
-$('#stop-btn').addEventListener('click', () => { stopSpeaking(); setState('standby'); });
-const PANELS = { memory: () => showMemory(history), settings: openSettings, diagnostics: showDiagnostics, modules: showModules, house: showHouse,
-  menu: () => showMenu({ bible: () => handleInput('Bíblia'), news: () => handleInput('Notícias'), memory: () => showMemory(history), modules: showModules, house: showHouse, settings: openSettings, diagnostics: showDiagnostics,
-    clap: () => { const s = getSettings(); saveSettings({ clap: { enabled: !s.clap.enabled } }).then((n) => applySettings(n, 'clap.enabled')); closeSheet(); }, stop: () => { stopSpeaking(); setState('standby'); closeSheet(); } }) };
+for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
+$('#core-button').addEventListener('click', () => (isSpeaking() || isPaused() ? stopAll() : startListening()));
+$('#stop-btn').addEventListener('click', stopAll);
+$('#pause-btn').addEventListener('click', togglePause);
+const PANELS = {
+  memory: () => showMemory(history), settings: openSettings, diagnostics: showDiagnostics, modules: showModules, house: showHouse,
+  menu: () => showMenu({
+    bible: () => handleInput('Bíblia'), news: () => handleInput('Notícias'), memory: () => showMemory(history), modules: showModules, house: showHouse, settings: openSettings, diagnostics: showDiagnostics,
+    clap: () => { const s = getSettings(); saveSettings({ clap: { enabled: !s.clap.enabled } }).then((n) => applySettings(n, 'clap.enabled')); closeSheet(); },
+    stop: () => { stopAll(); closeSheet(); },
+  }),
+};
 document.addEventListener('click', (e) => {
   const sayBtn = e.target.closest('[data-say]'); if (sayBtn) handleInput(sayBtn.dataset.say, 'text');
   const openBtn = e.target.closest('[data-open]'); if (openBtn) PANELS[openBtn.dataset.open]?.();
@@ -270,7 +333,7 @@ document.addEventListener('click', (e) => {
 // Atalhos de teclado (PC)
 document.addEventListener('keydown', (e) => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-  if (e.key === 'Escape') { if (isSpeaking()) { stopSpeaking(); setState('standby'); } else if (isListening()) { stopListening(); setState('standby'); } else closeSheet(); return; }
+  if (e.key === 'Escape') { if (isSpeaking() || isPaused()) stopAll(); else if (isListening()) { stopListening(); setState('standby'); } else closeSheet(); return; }
   if (typing) return;
   if (currentSheet() === 'bible' && (e.key === 'ArrowRight' || e.key === 'PageDown')) { e.preventDefault(); bibleActions.next(); return; }
   if (currentSheet() === 'bible' && (e.key === 'ArrowLeft' || e.key === 'PageUp')) { e.preventDefault(); bibleActions.prev(); return; }
@@ -278,6 +341,7 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (e.code === 'Space') { e.preventDefault(); startListening(); }
   else if (k === '/') { e.preventDefault(); $('#command-input').focus(); }
+  else if (k === 'p') togglePause();
   else if (k === 'b') handleInput('Bíblia');
   else if (k === 'n') handleInput('Notícias');
   else if (k === 'm') showMemory(history);
@@ -285,10 +349,44 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'd') showDiagnostics();
 });
 
-window.addEventListener('online', () => { toast('Conexão restabelecida.'); offlineNotified = false; refreshStatus(); });
-window.addEventListener('offline', () => { updateChips(); offlineHelp(); });
+window.addEventListener('online', () => { toast('Conexão restabelecida.'); refreshStatus(); });
+window.addEventListener('offline', updateBanner);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && getSettings()?.clap?.enabled) clientLog('palmas', 'App em segundo plano: o navegador pode suspender o microfone');
+  if (!document.hidden) { refreshStatus(); updateChips(); }
+});
 
-// ------------------------------------------------------------ relógio
+// ============================================================ lembretes (servidor → navegador)
+async function onReminder(evt) {
+  const text = `⏰ Lembrete: ${evt.payload.text}`;
+  addMsg('jarvis', text, { tag: 'TAREFAS' });
+  sounds.activate();
+  const shown = await notify('JARVIS — Lembrete', evt.payload.text);
+  if (!shown && document.hidden) clientLog('tarefas', 'Lembrete sem notificação (permissão não concedida)');
+  if (!document.hidden) say(`Lembrete: ${evt.payload.text}`);
+  refreshMemoryMini();
+}
+
+// ============================================================ PWA: atualização
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js').then((reg) => {
+    const offer = (w) => {
+      $('#update-bar').hidden = false;
+      $('#update-btn').onclick = () => w.postMessage('SKIP_WAITING');
+    };
+    if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
+    });
+    setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+  }).catch((e) => clientLog('interface', `Service worker não registrado: ${e.message}`, 'warn'));
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
+}
+
+// ============================================================ relógio
 function tick() {
   const now = new Date();
   $('#clock-time').textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -296,47 +394,74 @@ function tick() {
   $('#sys-uptime').textContent = `${Math.floor((Date.now() - startedAt) / 60000)} min`;
 }
 
-// ------------------------------------------------------------ inicialização
+// ============================================================ inicialização
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function bootLog(text, ok = true) {
+  const li = document.createElement('li'); li.className = ok ? 'ok' : 'warn'; li.textContent = text;
+  $('#boot-log').appendChild(li);
+  await wait(110);
+}
+
 async function boot() {
   core = createCore($('#core-canvas'));
   tick(); setInterval(tick, 1000);
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  setupServiceWorker();
+  await initMicState();
   try {
     lastStatus = await api.get('/api/status', { timeout: 15000 });
     applyServerSettings(lastStatus.settings);
     renderModules(lastStatus);
-    $('#boot-text').textContent = 'SISTEMAS ONLINE';
   } catch (err) {
-    $('#boot-text').textContent = 'SERVIDOR INACESSÍVEL — MODO LIMITADO';
+    serverReachable = false;
     clientLog('interface', `Boot sem servidor: ${err.message}`, 'warn');
   }
+  // Sequência de inicialização com o estado REAL de cada parte.
+  const ai = lastStatus?.llm;
+  await bootLog(serverReachable ? (ai?.configured ? `Cérebro online · IA ${ai.providerName}` : 'Cérebro online · modo local (IA não configurada)') : 'Cérebro: servidor inacessível — funções locais', serverReachable);
+  await bootLog(hearingSupported && window.isSecureContext ? 'Ouvido online.' : hearingSupported ? 'Ouvido: requer HTTPS.' : 'Ouvido indisponível neste navegador.', hearingSupported && window.isSecureContext);
+  await bootLog(voiceSupported ? 'Voz online.' : 'Voz indisponível neste navegador.', voiceSupported);
+  await bootLog(serverReachable ? 'Memória online.' : 'Memória: aguardando servidor.', serverReachable);
+  if (serverReachable && lastStatus?.online === false) await bootLog('Modo offline: sem internet no servidor.', false);
+  await bootLog('JARVIS pronto.');
+  $('#boot-text').textContent = 'SISTEMAS PRONTOS';
   applySettings(getSettings() || {}, null);
-  updateChips();
-  api.get(`/api/bible?pageSize=${pageSize()}`, { timeout: 20000 }).then(renderBibleMini).catch(() => {});
-  refreshMemoryMini();
+  updateBanner();
+  if (serverReachable) {
+    api.get(`/api/bible?pageSize=${pageSize()}`, { timeout: 20000 }).then(renderBibleMini).catch(() => {});
+    refreshMemoryMini();
+  }
   serverEvents((evt) => {
     bus.emit(EVENTS.SERVER_EVENT, evt);
+    if (evt.type === 'REMINDER_DUE') onReminder(evt);
     if (evt.type === 'MEMORY_UPDATED') refreshMemoryMini();
     if (['MEMORY_UPDATED', 'BIBLE_DAY_COMPLETED', 'NEWS_FETCHED', 'HOUSE_ACTION', 'LLM_ERROR'].includes(evt.type)) refreshStatus();
   });
-  setInterval(refreshStatus, 60000);
   // Um toque inicial é exigido pelos navegadores para liberar áudio e microfone.
   const start = $('#boot-start');
   start.hidden = false;
-  start.addEventListener('click', () => {
+  start.focus();
+  start.addEventListener('click', async () => {
     unlockVoice(); sounds.unlock();
     $('#boot').classList.add('hide');
     setTimeout(() => $('#boot').remove(), 700);
     setState('standby');
     bus.emit(EVENTS.ASSISTANT_STARTED);
-    applySettings(getSettings(), 'boot');
+    const s = getSettings();
+    if (s && wake) {
+      try { await wake.start(s); } catch (e) { toast(e.message); }
+    }
+    applySettings(s, 'boot');
     const h = new Date().getHours();
     const nome = lastStatus?.personality?.nome_usuario;
     const greet = `${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}${nome ? `, ${nome}` : ''}. JARVIS online.`;
-    addMsg('jarvis', `${greet} ${lastStatus?.llm?.configured ? 'Como posso ajudar?' : 'Estou no modo local (IA conversacional não configurada no servidor).'}`, { tag: 'SISTEMA' });
+    // Atalhos do app instalado (manifest "shortcuts")
+    const cmd = new URLSearchParams(location.search).get('cmd');
+    const SHORT = { biblia: 'Bíblia', noticias: 'Notícias', 'meu-dia': 'Meu dia' };
+    if (SHORT[cmd]) { window.history.replaceState(null, '', '/'); setTimeout(() => handleInput(SHORT[cmd]), 400); }
+    addMsg('jarvis', `${greet} ${!serverReachable ? OFFLINE_NOTICE : ai?.configured ? 'Como posso ajudar?' : 'Estou no modo local (IA conversacional não configurada no servidor). Diga “ajuda” para ver os comandos.'}`, { tag: 'SISTEMA' });
     say(greet);
   }, { once: true });
 }
 
 boot();
-window.addEventListener('beforeunload', () => { stopSpeaking(); stopClap(); });
+window.addEventListener('beforeunload', () => { stopAll(); wake?.stop(); });

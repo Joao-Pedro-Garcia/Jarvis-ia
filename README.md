@@ -1,180 +1,213 @@
-# JARVIS — Assistente Pessoal Inteligente
+# JARVIS — Assistente Pessoal Inteligente (v2)
 
-Assistente pessoal com voz, audição, **ativação por duas palmas**, interface futurista (HUD),
-memória, comandos em linguagem natural, **plano de leitura da Bíblia com continuidade**,
-resumo de **notícias / câmbio / combustíveis**, módulos de engenharia e motores, e base para
-automação residencial.
+Assistente pessoal com voz, audição, **ativação por duas palmas**, interface futurista,
+memória, tarefas e lembretes, **leitura da Bíblia com continuidade**, notícias, câmbio e
+combustíveis, módulos de engenharia e motores, e base para casa inteligente.
 
-- **Servidor:** Node.js 18+ puro (sem framework). Única dependência: `@anthropic-ai/sdk`.
-- **Interface:** HTML/CSS/JS (módulos ES, sem etapa de build), PWA instalável no Android e PC.
-- **Dados:** arquivos JSON locais em `data/` (não versionados).
+- **Servidor:** Node.js 18+ puro. Única dependência: `@anthropic-ai/sdk`.
+- **Interface:** HTML/CSS/JS sem etapa de build. **PWA instalável** no Android e no PC.
+- **Dados:** JSON locais em `data/` (não versionados). Nada vai para a nuvem, exceto o que
+  você envia à IA (se configurada) e o reconhecimento de fala do navegador.
+
+> Auditoria da v1 e o que mudou: [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
 
 ---
 
-## 1. Como executar
+## 1. Instalação e execução
 
 ```bash
 npm install
-cp .env.example .env        # opcional: coloque sua ANTHROPIC_API_KEY
-npm run bible:download      # opcional: baixa a Bíblia agora (senão baixa no primeiro uso)
+cp .env.example .env        # opcional — veja a seção 3
+npm run bible:download      # opcional — baixa a Bíblia agora (senão baixa no 1º uso)
 npm start                   # http://127.0.0.1:3000
 ```
 
-Abra no **Chrome** ou **Edge** (PC) ou no **Chrome do Android**, toque em **TOQUE PARA INICIAR**
-(os navegadores exigem um toque para liberar áudio e microfone).
+Abra no **Chrome**, **Edge** ou no **Chrome do Android** e toque em **TOQUE PARA INICIAR**
+(os navegadores exigem um toque para liberar áudio e microfone). A tela mostra
+“Cérebro online… Ouvido online… Voz online… Memória online… JARVIS pronto.” com o
+estado **real** de cada parte.
 
-### Usar no celular (mesma rede Wi‑Fi)
-O microfone só funciona em **HTTPS** ou `localhost`. Para acessar do celular:
+## 2. Microfone, HTTPS e Android
 
+**Regra do navegador:** o microfone só funciona em **HTTPS** ou em `localhost`.
+
+| Onde roda o servidor | Como abrir no Android | HTTPS? |
+|---|---|---|
+| **No próprio celular (Termux)** — recomendado | `http://localhost:3000` | Não precisa (localhost) |
+| No PC, celular na mesma Wi‑Fi | `https://IP-DO-PC:3000` | **Sim** (certificado) |
+
+### Opção A — tudo no celular (Termux) · não depende do PC
+1. Instale o **Termux** (F-Droid) e rode: `pkg install nodejs git`.
+2. `git clone <este repositório> && cd Jarvis-ia && npm install && npm start`.
+3. No Chrome do celular abra `http://localhost:3000` → **⋮ → Instalar app / Adicionar à tela inicial**.
+
+### Opção B — servidor no PC
 ```bash
 mkdir certs && openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
   -keyout certs/key.pem -out certs/cert.pem -subj "/CN=jarvis.local"
 ```
 No `.env`: `HOST=0.0.0.0`, `HTTPS_KEY=./certs/key.pem`, `HTTPS_CERT=./certs/cert.pem` e
-**defina `JARVIS_ACCESS_TOKEN`** (senão qualquer aparelho da rede pode usar seu JARVIS).
-Acesse `https://IP-DO-PC:3000`, aceite o certificado e use “Adicionar à tela inicial”.
+**`JARVIS_ACCESS_TOKEN=uma-senha-longa`**. No celular abra `https://IP-DO-PC:3000`, aceite o
+aviso do certificado, digite o token e instale o app pelo menu do Chrome.
 
-## 2. Configurar APIs (`.env`)
+### Conferir se está tudo certo
+Diga **“faça um diagnóstico”** ou toque em **Diagnóstico** (tecla D no PC). A tela mostra
+HTTPS, permissão, microfone, reconhecimento e notificações com 🟢/🟡/🔴, e o botão
+**Testar microfone** grava 3 s de áudio de verdade e diz se captou som.
 
-| Variável | Para quê | Obrigatória |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Cérebro conversacional (Claude, modelo `claude-opus-5-5` por padrão), resumo de notícias por IA, “detalhe a notícia”, pesquisa web | Não — sem ela o JARVIS funciona no **modo local** |
-| `JARVIS_MODEL`, `JARVIS_EFFORT` | Modelo e esforço (`low` = respostas mais rápidas) | Não |
-| `JARVIS_WEB_SEARCH` | `0` desliga a pesquisa web da IA | Não |
-| `JARVIS_TIMEZONE` | Fuso para “leitura de hoje” (padrão `America/Araguaina`) | Não |
-| `JARVIS_ACCESS_TOKEN` | Protege a API com token | Recomendado em rede |
-| `HOME_ASSISTANT_URL` / `HOME_ASSISTANT_TOKEN` | Módulo CASA (Home Assistant) | Não |
-| `BIBLE_SOURCE_URL`, `FUEL_GASOLINE_CSV`, `FUEL_DIESEL_CSV` | Trocar fontes de dados | Não |
+## 3. IA online (conversa livre)
 
-A chave **nunca** vai para o navegador: todas as chamadas à IA passam pelo servidor.
+Configure no `.env` (a chave fica **só no servidor**):
 
-Fontes de dados usadas (sem chave): câmbio **AwesomeAPI** (cotação comercial) com reserva na
-**PTAX do Banco Central**; combustíveis **ANP — Levantamento de Preços** (dados abertos, últimas
-4 semanas); notícias por **RSS** (Agência Brasil, g1, Folha, BBC News Brasil, DW) editáveis em
-`config/news-sources.json`.
+```ini
+AI_PROVIDER=anthropic          # anthropic | openai | ollama | none
+AI_API_KEY=sua-chave
+AI_MODEL=                      # vazio = padrão do provedor (anthropic → claude-opus-5-5)
+```
+- `openai` aceita qualquer API compatível com *Chat Completions* (ajuste `AI_BASE_URL`).
+- `ollama` usa um modelo local no seu PC, sem chave (`AI_MODEL=llama3.2`).
+- A versão 1 (`ANTHROPIC_API_KEY`) continua funcionando.
 
-## 3. Permissões necessárias
-- **Microfone** (ouvido e palmas) — pedido pelo navegador; requer HTTPS ou localhost.
-- **Internet**: reconhecimento de fala do Chrome/Android (processado pelo serviço do navegador),
-  IA, notícias, câmbio e combustíveis.
-- A síntese de voz é local (vozes instaladas no aparelho).
+O status aparece em **Configurações → IA ONLINE** e no diagnóstico (provedor e modelo, nunca a chave).
+**Sem IA**, o JARVIS diz claramente que a IA externa não está configurada e continua fazendo
+tudo que é local: comandos, Bíblia, memória, tarefas, contas, conversões, rotina e configurações.
+Para provedores novos, crie um arquivo em `server/brain/ai/` com `complete()` e registre em `llm.js`.
 
-## 4. Ativar com duas palmas
-1. **Configurações → PALMAS → “Ativar com duas palmas”** (ou menu ☰ → “Palmas on/off”).
-2. Bata **duas palmas** (intervalo de ~0,15 a 0,7 s). O JARVIS responde **“Sim?”** e começa a ouvir.
-3. Calibre com o medidor **Nível do microfone** (painel Sistema): a linha laranja é o limiar.
+## 4. O que funciona offline e online
 
-Como evita falsos positivos (`public/js/modules/clap-detector.js`): ataque súbito de energia,
-limiar adaptativo ao ruído ambiente, duração curta (fala/música são sustentadas), conteúdo de
-alta frequência (batidas graves de porta/mesa são rejeitadas), intervalo mínimo/máximo
-configurável, intensidades semelhantes, rejeição de 3ª palma (aplauso/ritmo) e tempo de espera.
-O detector roda num **AudioWorklet** e pausa enquanto o JARVIS fala ou ouve.
+| Sem internet (servidor acessível) | Precisa de internet |
+|---|---|
+| Interface, Bíblia já baixada, memória, tarefas e lembretes, contas, conversões, cálculos de motor, rotina, configurações, voz | IA externa (exceto Ollama local), notícias, câmbio, combustíveis, reconhecimento de fala do Chrome, Home Assistant fora da rede |
 
-## 5. Comando “Bíblia”
-Diga ou digite: **“Bíblia”**, “quero ler a Bíblia”, “continue de onde parei”, “onde parei?”,
-“passe a página” / “avança” / “próxima”, “volta a página” / “volta”, “próximo capítulo”,
-“voltar capítulo”, “abra João 3” (leitura livre), “próxima leitura” (adiantar), “concluir leitura”.
-No PC: **← →** viram a página. No celular: **deslize** para os lados.
+Se a internet cair aparece **“📡 MODO OFFLINE”**. Se o **servidor** ficar inacessível aparece
+**“SERVIDOR INACESSÍVEL”** e o navegador ainda responde hora, data, contas e conversões, e mostra a
+última página da Bíblia salva (sem registrar progresso).
 
-### Como o progresso é salvo
-Arquivo `data/bible-state.json`:
-- Posição inicial **Gênesis 2**; 3 capítulos/dia (configurável) → Dia 1: Gn 2–4, Dia 2: Gn 5–7, Dia 3: Gn 8–10…
-- A posição guardada é **capítulo + versículo**, então a página certa é retomada em qualquer tela.
-- Ao passar da última página de um capítulo ele é marcado como concluído; ao terminar o último,
-  aparece “Leitura de hoje concluída” e a próxima posição é salva.
-- **Nunca avança sozinho**: se a leitura não foi concluída, no dia seguinte “Bíblia” continua nela.
-  Se já concluiu hoje, só adianta se você pedir (“próxima leitura”).
-- Sequência (🔥) conta dias consecutivos com leitura concluída.
+## 5. Comandos (diga “ajuda”)
 
-## 6. Notícias
-“**Notícias**” → câmbio (dólar, euro, libra, com horário e variação), combustíveis (Tocantins e
-Brasil: gasolina comum, diesel S‑10 e diesel comum separados, com período e fonte), 3–5 notícias do
-Brasil, 3–5 do mundo e 1 curiosidade; depois pergunta se quer aprofundar. Também: “como está o
-dólar?”, “quanto está o diesel?”, “notícias do mundo”, “detalhe a segunda notícia”…
-Regras implementadas: só matérias das últimas 36 h e com data; cache curto (câmbio 1 min, feeds
-10 min, ANP 6 h — semanal); histórico de 4 dias evita repetição (“continua em destaque”); a IA só
-pode resumir matérias reais dos feeds (cada item precisa apontar para uma matéria); se algo
-falhar: “Não consegui confirmar a cotação atual neste momento.”
+| Módulo | Exemplos |
+|---|---|
+| 📖 Bíblia | “Bíblia”, “continue minha leitura”, “onde parei?”, “passe a página”, “avance”, “volta”, “volta uma”, “próximo capítulo”, “leia” (lê a página em voz alta), “abra João 3”, “próxima leitura” |
+| 📰 Notícias | “Notícias”, “me atualiza”, “quanto está o dólar?”, “quanto está a gasolina?”, “notícias do mundo”, “detalhe a segunda notícia” |
+| ✅ Tarefas | “me lembra de estudar às 19h”, “me lembra disso amanhã”, “me avisa daqui a 20 minutos…”, “quais são minhas tarefas?”, “concluí essa”, “adia para amanhã às 9h”, “cancela essa tarefa” |
+| 🧠 Memória | “lembre que…”, “o que você lembra sobre…”, “esqueça isso” |
+| 🗓 Rotina | “meu dia” (atrasadas → hoje → Bíblia → câmbio → próximos) |
+| 🔇 Voz | “fique silencioso”, “volte a falar”, “pare”, “pausa”, “continua a falar” |
+| 📊 Sistema | “status”, “faça um diagnóstico”, “ajuda”, “modo seguro” |
+| 🔧 Engenharia / 🚗 Motor | “15% de 230”, “converter 32 psi em bar”, “12 volts e 4 ohms”, “potência com 300 Nm a 4000 rpm”, “me ajuda com esse motor” (IA) |
+| 🏠 Casa | “ligar a luz da sala” (requer Home Assistant; sem ele aparece **NÃO CONFIGURADO**) |
 
-## 7. Outros módulos
-- **Memória**: “lembre que…”, “lembre disso”, “o que você lembra sobre…”, “esqueça…” (pede
-  confirmação), tarefas (“adicione uma tarefa…”, “minhas tarefas”). Painel para ver/editar/apagar.
-  Senhas, CPF, cartões e tokens exigem confirmação antes de salvar.
-- **Engenharia**: contas faladas (“15% de 230”, “raiz quadrada de 144”), conversões de unidades,
-  Lei de Ohm — tudo local e exato; perguntas abertas vão para a IA em modo técnico.
-- **Motor**: potência↔torque, cilindrada, consumo; diagnósticos via IA sempre com aviso de que
-  remoto não é certeza.
-- **Casa**: sem integração mostra tudo como **indisponível** (nada é simulado). Com Home Assistant
-  configurado: “ligar a luz da sala”, “desligar a TV” (ações críticas pedem confirmação).
-- **Segurança**: confirmação para ações importantes, **modo seguro** (confirma tudo e bloqueia a
-  casa), token de acesso, limite de requisições, CSP, logs sem conteúdo privado completo.
-- **Diagnóstico**: status de cada módulo, permissões, suporte do navegador e logs.
+Frases não precisam ser exatas: o JARVIS tolera variações e erros comuns de transcrição
+(“notisias”, “gazolina”) e usa o **contexto real da tela**: “avança/volta” só mexem na Bíblia
+se o leitor estiver aberto.
 
-Atalhos (PC): **Espaço** falar · **Esc** parar fala/fechar · **/** digitar · **B** Bíblia · **N**
-Notícias · **M** Memória · **S** Configurações · **D** Diagnóstico.
+Atalhos no PC: **Espaço** falar · **Esc** parar/fechar · **P** pausar fala · **/** digitar ·
+**B** Bíblia · **N** Notícias · **M** Memória · **S** Configurações · **D** Diagnóstico.
 
-## 8. Como adicionar novos comandos
-Em `server/brain/commands.js` (ou num arquivo novo importado por ele):
+## 6. Bíblia — continuidade
+- Começa em **Gênesis 2**; 3 capítulos por dia: **Gn 2–4 → 5–7 → 8–10 → 11–13…**
+- Salva livro, capítulo, versículo (logo, a página), capítulos concluídos e sequência de dias em
+  `data/bible-state.json`. Fechou no meio? Volta exatamente na mesma página.
+- “Leitura de hoje concluída.” **não inicia o dia seguinte**: a próxima leitura só começa no
+  próximo dia ou se você pedir (“próxima leitura”).
+- Texto: Almeida Corrigida Fiel (ACF), baixado uma vez para uso pessoal (não redistribuído).
+
+## 7. Notícias, câmbio e combustíveis
+- **Câmbio:** AwesomeAPI (cotação comercial, com horário e variação); se falhar, **PTAX do
+  Banco Central** (rotulada como PTAX). Cache de 1 min. Sem fonte: “Não consegui confirmar a
+  cotação atual neste momento.”
+- **Combustíveis:** ANP — Levantamento de Preços. Ordem das fontes: (1) planilha semanal das
+  últimas 4 semanas; (2) série mensal, localizada automaticamente na página de dados abertos da
+  ANP. Mostra Tocantins e Brasil com **Gasolina comum, Diesel comum e Diesel S‑10 separados**,
+  média simples, período e fonte. Pesquisa com mais de 14 dias recebe aviso. Se nada responder:
+  **“Não consegui confirmar os preços atuais.”** — a última pesquisa obtida pode aparecer, mas
+  **separada e com a data**, nunca como atual. O portal gov.br às vezes recusa acessos automatizados;
+  o JARVIS **não tenta contornar** esse bloqueio.
+- **Notícias:** RSS de Agência Brasil, g1, Folha, BBC News Brasil e DW (`config/news-sources.json`).
+  Só matérias com data e das últimas 36 h, com fonte e horário. Repetidas viram “continua em
+  destaque”. Com IA, a seleção/resumo só pode usar matérias reais dos feeds.
+
+## 8. Palmas
+**Configurações → PALMAS**: ativar, sensibilidade, intervalo mínimo e máximo, limiar manual
+e tempo de espera. Bata **duas palmas**: o JARVIS responde **“Sim?”** e escuta. Duas palmas
+enquanto ele fala **interrompem a fala**.
+
+Critérios contra falso positivo: ataque rápido, limiar adaptativo ao ruído, duração curta
+(fala e música são sustentadas), alta frequência (porta/mesa são graves), intervalo,
+intensidades parecidas, rejeição da 3ª palma (aplauso) e tempo de espera.
+
+**Limitação honesta:** para detecção contínua de palmas com a tela bloqueada, o navegador pode
+interromper o microfone em segundo plano. Deixe o JARVIS aberto (ative **Manter tela ligada**,
+de preferência com o celular na tomada). A arquitetura já tem `WakeDetector` com
+`BrowserWakeDetector` (atual) e `AndroidNativeWakeDetector` (`public/js/modules/wake/`), que só
+será usado por um futuro app Android nativo com serviço em primeiro plano — esse app **não existe**
+neste projeto.
+
+## 9. Memória, dados sensíveis e notificações
+- Painel **Memória**: tarefas/lembretes (concluir, adiar, cancelar, editar), memórias,
+  preferências, progresso da Bíblia e a sessão atual (esta não vai para o disco).
+- Senhas, CPF, cartões e tokens: pedem confirmação, ficam **criptografados (AES‑256‑GCM)** em
+  disco, aparecem mascarados, só são mostrados após nova confirmação, nunca são falados e
+  nunca são enviados à IA. A chave fica em `JARVIS_SECRET_KEY` ou `data/.secret.key`: quem tiver o
+  disco **e** a chave consegue ler.
+- **Notificações:** Configurações → Permitir notificações. Os lembretes avisam com o JARVIS aberto
+  (inclusive em segundo plano, se o navegador permitir). **Com o app fechado não há aviso** — isso
+  exigiria um servidor de push, que não foi implementado.
+
+## 10. Segurança
+Confirmação para ações importantes (apagar memória, cancelar tarefa, desligar dispositivos),
+**modo seguro** (confirma tudo e bloqueia a casa), token de acesso opcional, proteção contra
+**CSRF** (só JSON e só da mesma origem), limite de requisições, CSP, logs sem o conteúdo das
+suas falas. Chaves só no `.env`.
+
+## 11. Comandos personalizados
+Crie um arquivo em `server/commands/custom/` — nada mais precisa mudar
+(exemplo: `server/commands/custom/moeda.js`, “cara ou coroa”):
 
 ```js
-registerCommand({
-  name: 'clima.hoje', module: 'CLIMA', priority: 60,
-  description: 'Previsão do tempo',
-  aliases: ['Vai chover hoje?'],                 // exemplos (aparecem no painel Módulos)
-  patterns: [/\b(vai chover|previsao do tempo)\b/],   // texto já normalizado (sem acentos)
-  context: (sess) => true,                       // opcional: só vale em certo contexto
-  params: (t, match, sess) => ({}),              // opcional
-  permission: 'safe',                            // 'safe' | 'confirm' | 'restricted'
-  mutates: false,                                // true = pede confirmação no modo seguro
-  confirmText: (p) => null,                      // pergunta de confirmação
-  action: async (params, ctx) => ({ text: 'Resposta…', speech: 'Fala…', ui: { panel: 'news' } }),
-});
+export default {
+  name: 'custom.clima', description: 'Previsão do tempo', aliases: ['Vai chover hoje?'],
+  patterns: [/\bvai chover\b/],          // texto já normalizado (minúsculo, sem acentos)
+  permission: 'safe',                    // 'safe' | 'confirm' | 'restricted'
+  action: async (params, ctx) => ({ text: 'Resposta na tela', speech: 'Resposta falada', data: {} }),
+};
 ```
-Adicione frases ao `tests/nlu.test.js` e rode `npm test`.
+O orquestrador transforma o retorno em resultado estruturado
+`{ success, intent, module, data, message, source, timestamp }`.
 
-## 9. Arquitetura
+## 12. Testes
 
+```bash
+npm test        # 194 testes automatizados (sem internet)
+npm run e2e     # teste final no navegador (requer Playwright + Chromium) — 27 etapas
+```
+
+| Tipo | Cobertura |
+|---|---|
+| Unitários/integração (`tests/*.test.js`) | intenções (~150 frases), orquestrador, Bíblia, memória, dados sensíveis, tarefas/datas/agendador, contas/conversões, parsing de APIs (amostra real da AwesomeAPI), fallbacks, rede lenta/fora/erro/JSON inválido, provedores de IA (simulados), segurança HTTP real (token, CSRF, path traversal), palmas (sinais sintéticos) |
+| E2E (`tests/e2e/run-e2e.js`) | Chromium real; **palmas por áudio real** (WAV no microfone falso); teste de microfone com `getUserMedia`; modo offline; reinício do servidor; persistência; layout Pixel 7; PWA (manifest, ícones, service worker) |
+| **Simulado** | reconhecimento de fala e síntese de voz no E2E (frases roteirizadas/fala interceptada); APIs de IA e fontes de dados nos testes unitários |
+| **Não testado** | aparelho Android físico, instalação real do PWA, microfone físico, vozes reais, notificação do sistema (o Chromium sem tela nega a permissão), IA com chave real, fontes externas reais (bloqueadas neste ambiente de desenvolvimento) |
+
+## 13. Estrutura
 ```
 server/
-  index.js                 HTTP + API REST + SSE (eventos em tempo real) + estáticos
-  core/                    eventos, logs, armazenamento JSON, configurações, http/cache, texto, datas
-  brain/                   CÉREBRO: brain.js (fluxo), commands.js (registro), tone.js (tipo de conversa),
-                           personality.js (prompt), llm.js (Claude API)
-  modules/bible|news|memory|house|engineering|engine
-public/
-  js/core                  barramento de eventos, API, estado, configurações, logs do cliente
-  js/modules               hearing (OUVIDO), voice (VOZ), clap + clap-detector + worklet (PALMAS), sons
-  js/ui                    núcleo animado (canvas), leitor da Bíblia, notícias, painéis
-config/personality.json    personalidade (nome, tom, humor, formalidade, detalhamento, modos)
-config/news-sources.json   fontes RSS
+  index.js              HTTP + API + SSE + estáticos (+ /shared)
+  brain/                brain.js (entrada), orchestrator.js (pipeline), commands.js (registro),
+                        tone.js (7 tons + emergência), personality.js, llm.js + ai/ (provedores)
+  commands/             loader.js + custom/ (comandos personalizados)
+  core/                 eventos, logs, store, settings, http/cache, health, selftest, secrets, when (datas)
+  modules/              bible, news, memory, tasks, house, engineering, engine
+shared/                 math.js, units.js (usados pelo servidor e pelo navegador offline)
+public/js/              core/ (bus, api, estado, offline-brain), modules/ (ouvido, voz, palmas, device, wake/),
+                        ui/ (núcleo, Bíblia, notícias, painéis, diagnóstico)
+config/                 personality.json (tons), news-sources.json
 ```
-Fluxo: `MICROFONE/PALMAS → OUVIDO → TRANSCRIÇÃO → CÉREBRO → INTENÇÃO → AÇÃO OU IA → resposta → VOZ + INTERFACE`.
-Eventos: `VOICE_RECEIVED, COMMAND_DETECTED, BIBLE_OPENED, PAGE_NEXT, PAGE_PREVIOUS, CLAP_DETECTED,
-ASSISTANT_STARTED/STOPPED, SPEECH_STARTED/FINISHED, MEMORY_UPDATED…` (cliente e servidor).
 
-## 10. Testes
-```bash
-npm test          # 108 testes: intenções, Bíblia, palmas, matemática, notícias, memória, segurança
-npm run e2e       # teste final no navegador (requer Playwright + Chromium)
-```
-O teste final abre o app no Chromium com um **microfone falso alimentado por um WAV com duas
-palmas**, ativa pelo áudio real, conversa (reconhecimento de fala simulado com frases
-roteirizadas), abre a Bíblia, passa/volta página, fecha, reabre e confere o progresso, testa
-conversa, pergunta técnica, desabafo/mudança de tom, memória, diagnóstico/logs/permissões,
-queda do servidor e layout de celular (Pixel 7) com gesto de deslizar.
-
-## 11. Limitações conhecidas (honestas)
-- **Reconhecimento de fala** depende do navegador: Chrome/Edge/Android funcionam (com internet);
-  Firefox não suporta — use texto. No Android, o detector de palmas libera o microfone enquanto o
-  reconhecimento de fala está ativo.
-- **Palmas** com a tela do celular bloqueada: navegadores suspendem o microfone em segundo plano.
-  Para “bater palmas de longe” deixe o JARVIS aberto em primeiro plano (ex.: PC ou tablet na tomada).
-- **Sem `ANTHROPIC_API_KEY`**: não há conversa livre; desabafo e conversa recebem respostas
-  locais limitadas (avisando isso); notícias usam seleção automática sem resumo por IA.
-- **Combustíveis**: o JARVIS calcula a **média simples** das coletas da semana mais recente dos
-  dados abertos da ANP; pode diferir levemente da “Síntese semanal” oficial. O site gov.br às vezes
-  bloqueia acessos automatizados — nesse caso o JARVIS informa que não conseguiu obter os preços.
-- **Texto bíblico**: Almeida Corrigida Fiel (ACF) do repositório público `thiagobodruk/biblia`
-  (baixado para uso pessoal; não é redistribuído neste repositório). Reserva: bible-api.com (Almeida).
-- **Casa**: só Home Assistant está implementado; outras plataformas exigem um adaptador novo em
-  `server/modules/house/house.js`.
+## 14. Limitações conhecidas
+- Reconhecimento de fala: Chrome/Edge/Android (online). Firefox não tem; Safari iOS é parcial. Use texto.
+- No Android, palmas e reconhecimento disputam o microfone: as palmas pausam enquanto ele ouve; a
+  interrupção por “pare” fica desligada se as palmas estiverem ativas (use duas palmas para interromper).
+- Palmas/lembretes com o app fechado ou a tela bloqueada não são garantidos (limite do navegador).
+- Média de combustíveis calculada pelo JARVIS pode diferir levemente da síntese oficial da ANP.
+- Casa: apenas Home Assistant.

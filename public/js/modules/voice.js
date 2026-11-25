@@ -50,7 +50,7 @@ export function speak(text) {
   return new Promise((resolve) => {
     let i = 0;
     // Chrome às vezes pausa sozinho em falas longas: "keepalive".
-    const keep = setInterval(() => { if (synth.speaking && !synth.paused) { synth.pause(); synth.resume(); } }, 10000);
+    const keep = setInterval(() => { if (synth.speaking && !synth.paused && !paused) { synth.pause(); synth.resume(); } }, 10000);
     const done = (completed) => { clearInterval(keep); if (token === speakingToken) bus.emit(EVENTS.SPEECH_FINISHED, { completed }); resolve(completed); };
     const next = () => {
       if (token !== speakingToken) return done(false);
@@ -61,7 +61,9 @@ export function speak(text) {
       u.onboundary = () => bus.emit(EVENTS.SPEECH_BOUNDARY);
       // Segurança: alguns navegadores não disparam onend (sem vozes instaladas, etc.).
       let ended = false;
-      const guard = setTimeout(() => { if (!ended) { ended = true; next(); } }, 2500 + (u.text.length * 110) / opts.rate);
+      let guard;
+      const arm = (ms) => { clearTimeout(guard); guard = setTimeout(() => { if (paused) return arm(1000); if (!ended) { ended = true; next(); } }, ms); };
+      arm(2500 + (u.text.length * 110) / opts.rate);
       u.onend = () => { if (ended) return; ended = true; clearTimeout(guard); next(); };
       u.onerror = (e) => {
         if (ended) return; ended = true; clearTimeout(guard);
@@ -76,7 +78,22 @@ export function speak(text) {
 
 export function stopSpeaking() {
   speakingToken++;
+  paused = false;
   if (synth) synth.cancel();
+}
+
+// ---------- Pausar / continuar ----------
+let paused = false;
+export const isPaused = () => paused;
+export function pauseSpeaking() {
+  if (!synth || !isSpeaking()) return false;
+  synth.pause(); paused = true; bus.emit('speech:paused');
+  return true;
+}
+export function resumeSpeaking() {
+  if (!synth || !paused) return false;
+  synth.resume(); paused = false; bus.emit('speech:resumed');
+  return true;
 }
 
 /** Alguns navegadores (iOS/Android) exigem um gesto do usuário antes de falar. */

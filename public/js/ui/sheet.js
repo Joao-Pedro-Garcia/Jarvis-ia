@@ -1,5 +1,6 @@
 // Painéis sobrepostos (folhas holográficas).
 import { $ } from './dom.js';
+import { bus } from '../core/bus.js';
 
 let current = null;
 let onCloseCb = null;
@@ -12,6 +13,7 @@ export function openSheet(id, title, render, { onClose } = {}) {
   const body = $('#sheet-body');
   body.innerHTML = '';
   $('#overlay').hidden = false;
+  bus.emit('sheet:open', id);
   render(body);
   return body;
 }
@@ -20,6 +22,7 @@ export function closeSheet() {
   if (!current) return;
   $('#overlay').hidden = true;
   const cb = onCloseCb; current = null; onCloseCb = null;
+  bus.emit('sheet:close');
   cb?.();
 }
 

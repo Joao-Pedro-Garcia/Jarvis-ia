@@ -50,7 +50,7 @@ export async function modulesStatus() {
       m('ouvido', 'OUVIDO', 'client', 'Reconhecimento de fala do navegador (Web Speech API).'),
       m('voz', 'VOZ', s.voice.enabled ? 'client' : 'off', `Síntese de voz local do navegador · velocidade ${s.voice.rate}`),
       m('palmas', 'PALMAS', s.clap.enabled ? 'client' : 'off', `Duas palmas · sensibilidade ${s.clap.sensitivity}`),
-      m('casa', 'CASA', houseIntegrations.some((i) => i.configured) ? 'online' : 'unavailable', houseIntegrations.some((i) => i.configured) ? 'Home Assistant configurado' : 'Nenhuma integração configurada — funções indisponíveis.'),
+      m('casa', 'CASA', houseIntegrations.some((i) => i.configured) ? 'online' : 'unavailable', houseIntegrations.some((i) => i.configured) ? 'DISPONÍVEL · Home Assistant configurado' : 'NÃO CONFIGURADO — nenhuma integração; nenhum dispositivo é simulado.'),
       m('engenharia', 'ENGENHARIA', 'online', `Cálculos e conversões locais${llmS.configured ? ' + IA técnica' : ''}`),
       m('motor', 'MOTOR', 'online', `Cálculos automotivos locais${llmS.configured ? ' + IA técnica' : ''}`),
       m('biblia', 'BÍBLIA', bible.offline ? 'online' : (online ? 'online' : 'offline'), bible.offline ? 'Texto salvo localmente (offline).' : 'Texto será baixado no primeiro uso.'),

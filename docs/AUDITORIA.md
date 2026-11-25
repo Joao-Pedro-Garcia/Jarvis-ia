@@ -32,3 +32,27 @@ caminho substituída por simulador (ex.: reconhecimento de fala no navegador hea
 | Logs | Sim | E2E | — | Registrava trecho do texto do usuário (dado pessoal desnecessário). |
 | Interface | Sim | E2E (PC + Pixel 7 emulado) | — | Estados LISTENING/SPEAKING com mesma cor do ONLINE; animação continuava rodando atrás de painéis em tela cheia no celular. |
 | Android físico | — | **Não testado** | Aparelho | Nenhum teste em aparelho real é possível neste ambiente. |
+
+## Resultado da Fase 2
+
+| Problema da auditoria | Situação |
+|---|---|
+| CSRF (POST de qualquer origem/Content-Type) | **Corrigido**: só JSON + verificação de Origin; teste HTTP real |
+| Mapa de rate-limit sem limpeza | **Corrigido** (limpeza periódica) |
+| Logs com trecho do texto do usuário | **Corrigido** (só tamanho e intenção) |
+| Provedor de IA único | **Corrigido**: camada `AI_PROVIDER` (anthropic, openai-compatível, ollama, none) |
+| Resultado não estruturado | **Corrigido**: orquestrador com `{success,intent,module,data,message,source,timestamp}` |
+| Comandos ausentes (ajuda, status, silêncio, diagnóstico, meu dia, lembretes, pausar) | **Implementados** e testados |
+| Erros de transcrição | **Tolerância** conservadora (lista de formas válidas para não "corrigir" demais) |
+| Tons fora do pedido | **7 tons**: sério, normal, resenha, técnico, estudo, desabafo, urgente (com resposta local de emergência) |
+| "OUVINDO" antes do navegador ouvir | **Corrigido**: estado só após `onstart`; estados do microfone ATIVO/INATIVO/SEM PERMISSÃO/INDISPONÍVEL |
+| "Pare" não funcionava durante a fala | **Corrigido**: interrupção por voz (frases curtas) e por duas palmas; pausar/continuar |
+| Palmas sem intervalo mínimo/limiar na interface; sem WakeDetector | **Corrigido**: configurações + `WakeDetector` / `BrowserWakeDetector` / `AndroidNativeWakeDetector` (ponte para app futuro) |
+| Combustíveis com fonte única | **Corrigido**: semanal → série mensal (ANP) → última pesquisa **rotulada**, nunca como atual. Sem burlar bloqueio anti-robô do gov.br |
+| Tarefas sem data/lembrete | **Implementado**: datas em português, agendador, adiar/cancelar/editar/concluir, notificações via Service Worker |
+| Dados sensíveis em texto aberto | **Corrigido**: AES‑256‑GCM, mascarados, revelação só com confirmação, nunca falados nem enviados à IA |
+| "Esqueça isso" apagava a mais recente | **Corrigido**: usa a memória referida na conversa |
+| PWA só com SVG | **Corrigido**: PNG 192/512/maskable/apple-touch, manifest completo, atalhos, aviso de atualização |
+| Sem banner/fallback offline | **Corrigido**: "MODO OFFLINE" / "SERVIDOR INACESSÍVEL" + respostas locais no navegador |
+| Núcleo com estados parecidos; animação atrás de painéis | **Corrigido**: visual próprio por estado; animação pausada quando coberta no celular |
+| Teste em Android físico | **Continua NÃO TESTADO** (impossível neste ambiente) |

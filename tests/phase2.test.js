@@ -216,3 +216,14 @@ test('modo seguro também protege tarefas', async () => {
   await processInput('não', s);
   updateSettings({ security: { safeMode: false } });
 });
+
+test('personalidade: os 7 tons têm instrução e o humor é proibido nos sérios', async () => {
+  const { TONES } = await import('../server/brain/tone.js');
+  const { getPersonality, systemPrompt } = await import('../server/brain/personality.js');
+  const p = getPersonality();
+  assert.deepEqual(TONES.sort(), Object.keys(p.modos).sort());
+  const prompt = systemPrompt(p, { tone: { mode: 'desabafo' }, domain: null, memory: '', context: '', now: 'agora' });
+  assert.match(prompt, /Tom detectado agora: DESABAFO/);
+  assert.match(prompt, /COMPREENDA/);
+  assert.match(prompt, /nunca em SÉRIO, DESABAFO, URGENTE/);
+});

@@ -4,6 +4,9 @@
 import { bus, EVENTS } from '../core/bus.js';
 import { clientLog } from '../core/logger.js';
 
+// Estados reais do microfone são publicados via evento 'mic:state' (ver device.js).
+const micState = (s) => bus.emit('mic:set', s);
+
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const hearingSupported = !!SR;
 
@@ -44,12 +47,14 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
       clearTimeout(silenceTimer);
       active = false;
       try { rec.stop(); } catch {}
+      micState(err && /negada|bloqueou/.test(err.message) ? 'denied' : err && /microfone encontrado/.test(err.message) ? 'unavailable' : 'inactive');
       bus.emit(EVENTS.LISTEN_ENDED, { text: finalText });
       if (err) reject(err); else resolve(finalText.trim());
       resumeWake();
     };
     const armSilence = () => { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => finish(), finalText ? silenceMs : Math.max(silenceMs * 3, 6000)); };
-    rec.onstart = () => { active = true; bus.emit(EVENTS.LISTEN_STARTED); clientLog('ouvido', 'Escuta iniciada'); armSilence(); };
+    // Só agora o navegador confirmou que está ouvindo de verdade.
+    rec.onstart = () => { active = true; micState('active'); bus.emit(EVENTS.LISTEN_STARTED); clientLog('ouvido', 'Escuta iniciada'); armSilence(); };
     rec.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -107,3 +112,35 @@ function startWake(lang = 'pt-BR') {
 function stopWake() { if (wakeRec) { const r = wakeRec; wakeRec = null; r.onend = null; try { r.abort(); } catch {} } }
 function resumeWake() { if (wakeEnabled) setTimeout(() => startWake(), 600); }
 export const wakeStatus = () => ({ enabled: wakeEnabled, running: !!wakeRec });
+
+// ---------- Interrupção pela voz ("pare") durante a fala do JARVIS ----------
+const STOP_WORDS = /^(pare|para|parar|chega|silencio|stop|cala a boca|ja chega|pode parar|jarvis para|jarvis pare)$/;
+const PAUSE_WORDS = /^(pausa|pause|espera|jarvis pausa)$/;
+let bargeRec = null;
+
+/** Escuta apenas comandos curtos de parar/pausar enquanto o JARVIS fala. */
+export function startBargeIn({ lang = 'pt-BR', onStop, onPause } = {}) {
+  if (!SR || active || bargeRec) return () => {};
+  stopWake();
+  const r = new SR();
+  r.lang = lang; r.continuous = true; r.interimResults = true;
+  r.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      // Só frases MUITO curtas: o eco da própria fala do JARVIS é longo e não dispara.
+      const t = e.results[i][0].transcript.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]/g, '').trim();
+      if (STOP_WORDS.test(t)) { clientLog('voz', 'Fala interrompida pelo comando de voz'); onStop?.(); return; }
+      if (PAUSE_WORDS.test(t)) { onPause?.(); return; }
+    }
+  };
+  r.onerror = () => {};
+  r.onend = () => { if (bargeRec === r) bargeRec = null; };
+  try { r.start(); bargeRec = r; } catch { bargeRec = null; }
+  return stopBargeIn;
+}
+
+export function stopBargeIn() {
+  if (!bargeRec) return;
+  const r = bargeRec; bargeRec = null; r.onend = null;
+  try { r.abort(); } catch {}
+  resumeWake();
+}

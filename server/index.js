@@ -91,11 +91,14 @@ function authorized(req, url) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+const SHARED_DIR = path.join(ROOT, 'shared');
 function serveStatic(req, res, url) {
   let p = decodeURIComponent(url.pathname);
   if (p === '/') p = '/index.html';
-  const file = path.normalize(path.join(PUBLIC_DIR, p));
-  if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, 'Proibido');
+  // /shared/ = módulos puros usados por servidor E navegador (cálculos offline)
+  const rootDir = p.startsWith('/shared/') ? SHARED_DIR : PUBLIC_DIR;
+  const file = path.normalize(path.join(rootDir, p.startsWith('/shared/') ? p.slice('/shared'.length) : p));
+  if (!file.startsWith(rootDir + path.sep)) return send(res, 403, 'Proibido');
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, 'Não encontrado');
     const ext = path.extname(file);
@@ -130,7 +133,7 @@ async function api(req, res, url) {
   switch (route) {
     case 'GET /api/status': {
       const st = await modulesStatus();
-      return send(res, 200, { ...st, llm: llm.status(), settings: getSettings(), personality: getPersonality(), recentCommands: getRecentCommands(), version: '1.0.0', serverTime: new Date().toISOString(), timezone: process.env.JARVIS_TIMEZONE || 'America/Araguaina' });
+      return send(res, 200, { ...st, llm: llm.status(), settings: getSettings(), personality: getPersonality(), recentCommands: getRecentCommands(), version: '2.0.0', serverTime: new Date().toISOString(), timezone: process.env.JARVIS_TIMEZONE || 'America/Araguaina' });
     }
     case 'POST /api/input': {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
@@ -264,7 +267,7 @@ export function createServer() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'server', 'index.js')) {
   const { server, protocol } = createServer();
-  tasks.startScheduler();
+  tasks.startScheduler(Number(process.env.JARVIS_REMINDER_INTERVAL_MS) || 20000);
   server.listen(PORT, HOST, () => {
     bus.emitEvent(EVENTS.ASSISTANT_STARTED, {});
     log.info('sistema', `JARVIS online em ${protocol}://${HOST}:${PORT} · IA: ${llm.available() ? llm.model() : 'não configurada (modo local)'}`);

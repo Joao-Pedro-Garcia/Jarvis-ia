@@ -20,6 +20,7 @@ export const DEFAULTS = {
   confirmMs: 350, // janela para garantir que não veio a 3ª palma
   cooldownMs: 2500,
   hfMin: 0.18,
+  thresholdOverride: 0,
   attackRatio: 3.2,
 };
 
@@ -39,7 +40,8 @@ export class ClapDetector {
     this.o = { ...DEFAULTS, ...(this.o || {}), ...opts };
     const s = Math.min(1, Math.max(0, this.o.sensitivity));
     this.ratio = 16 - s * 11; // 16× (pouco sensível) … 5× (muito sensível) acima do piso
-    this.absMin = 0.22 - s * 0.17; // pico mínimo 0,22 … 0,05 (escala -1..1)
+    // Limiar manual (0 = automático pela sensibilidade). Pico mínimo na escala 0..1.
+    this.absMin = this.o.thresholdOverride > 0 ? this.o.thresholdOverride : 0.22 - s * 0.17;
   }
 
   threshold() { return Math.max(this.absMin, this.floor * this.ratio * 2.2); }

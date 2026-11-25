@@ -1,7 +1,7 @@
 // Núcleo central animado (canvas 2D). Leve: limita FPS, pausa em 2º plano,
 // reduz partículas no modo econômico e respeita "reduzir movimento".
 const COLORS = {
-  standby: [94, 242, 255], listening: [120, 250, 255], thinking: [255, 181, 71], speaking: [94, 242, 255], error: [255, 77, 109],
+  standby: [94, 242, 255], listening: [200, 255, 255], thinking: [255, 181, 71], speaking: [94, 242, 255], error: [255, 77, 109],
 };
 
 export function createCore(canvas) {
@@ -12,6 +12,7 @@ export function createCore(canvas) {
   let fpsCap = 60, particlesOn = true, animOn = true;
   let color = [...COLORS.standby];
   let rot = 0;
+  let covered = false; // pausado quando um painel cobre o núcleo (economia de bateria)
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let particles = [];
 
@@ -40,7 +41,7 @@ export function createCore(canvas) {
 
   function draw(ts) {
     raf = requestAnimationFrame(draw);
-    if (document.hidden) return;
+    if (document.hidden || covered) return;
     const minDt = 1000 / fpsCap;
     if (ts - last < minDt - 1) return;
     const dt = Math.min(64, ts - last || 16); last = ts;
@@ -55,7 +56,7 @@ export function createCore(canvas) {
     else target = 0.12 + Math.sin(t * 1.2) * 0.04;
     level += (target - level) * 0.18;
 
-    const goal = state === 'standby' || state === 'speaking' || state === 'listening' ? themeRgb() : COLORS[state];
+    const goal = state === 'standby' || state === 'speaking' ? themeRgb() : COLORS[state];
     for (let i = 0; i < 3; i++) color[i] += (goal[i] - color[i]) * 0.08;
     const c = color.map(Math.round);
 
@@ -116,6 +117,36 @@ export function createCore(canvas) {
     ctx.shadowColor = rgba(c, 0.9); ctx.shadowBlur = fpsCap < 40 ? 0 : 14;
     ctx.stroke(); ctx.shadowBlur = 0;
 
+    // LISTENING: ondas que se expandem (o JARVIS está captando)
+    if (state === 'listening') {
+      for (let k = 0; k < 3; k++) {
+        const ph = ((t * 0.9 + k / 3) % 1);
+        ctx.strokeStyle = rgba(c, (1 - ph) * 0.55); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, R * (0.4 + ph * 0.55), 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    // SPEAKING: barras radiais de áudio
+    if (state === 'speaking') {
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        const amp = (0.04 + level * 0.14) * (0.5 + 0.5 * Math.abs(Math.sin(t * 9 + i * 1.7)));
+        ctx.strokeStyle = rgba(c, 0.7);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * R * 0.53, cy + Math.sin(a) * R * 0.53);
+        ctx.lineTo(cx + Math.cos(a) * R * (0.53 + amp), cy + Math.sin(a) * R * (0.53 + amp));
+        ctx.stroke();
+      }
+    }
+    // THINKING: pontos orbitando rápido
+    if (state === 'thinking') {
+      for (let k = 0; k < 6; k++) {
+        const a = t * 4 + (k / 6) * Math.PI * 2;
+        ctx.fillStyle = rgba(c, 0.9 - k * 0.12);
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a) * R * 0.44, cy + Math.sin(a) * R * 0.44, 3.2 - k * 0.35, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
     // Núcleo interno
     const inner = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.38);
     inner.addColorStop(0, rgba(c, 0.22 + level * 0.25));
@@ -147,6 +178,7 @@ export function createCore(canvas) {
   return {
     setState(s) { state = s; if (s === 'listening' || s === 'speaking') target = 0.7; },
     pulse(amount = 0.5) { target = Math.min(1, target + amount); },
+    setCovered(v) { covered = !!v; },
     configure({ eco, particles: p, animations } = {}) {
       fpsCap = eco ? 24 : 60; particlesOn = p !== false && !eco; animOn = animations !== false; seed();
     },

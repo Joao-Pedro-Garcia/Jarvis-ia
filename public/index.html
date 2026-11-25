@@ -8,6 +8,10 @@
   <title>JARVIS</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/css/jarvis.css">
 </head>
 <body data-state="standby">
@@ -27,6 +31,7 @@
       <span class="chip" id="chip-ai" title="Cérebro / IA"><i></i><b>IA</b></span>
       <span class="chip" id="chip-mic" title="Microfone"><i></i><b>MIC</b></span>
       <span class="chip" id="chip-clap" title="Palmas"><i></i><b>PALMAS</b></span>
+      <span class="chip chip-silent" title="Modo silencioso">🔇<b>SILENCIOSO</b></span>
     </div>
     <div class="clock">
       <time id="clock-time">--:--</time>
@@ -63,7 +68,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
         </button>
         <input id="command-input" type="text" placeholder="Fale ou digite um comando…  ( / para digitar · espaço para falar )" aria-label="Comando" maxlength="2000">
-        <button type="button" class="icon-btn stop-btn" id="stop-btn" title="Parar fala (Esc)" aria-label="Parar fala">■</button>
+        <span class="speech-controls"><button type="button" class="icon-btn" id="pause-btn" title="Pausar/continuar fala (P)" aria-label="Pausar ou continuar a fala">❚❚</button><button type="button" class="icon-btn" id="stop-btn" title="Parar fala (Esc)" aria-label="Parar fala">■</button></span>
         <button type="submit" class="send-btn" aria-label="Enviar">➤</button>
       </form>
       <nav class="quick" aria-label="Atalhos">
@@ -123,10 +128,13 @@
   </div>
 
   <div class="toast" id="toast" role="status" hidden></div>
+  <div class="banner" id="banner" role="status" hidden></div>
+  <div class="update-bar" id="update-bar" hidden><span>Nova versão do JARVIS disponível.</span><button class="btn small" id="update-btn">Atualizar</button></div>
 
   <div class="boot" id="boot">
     <div class="boot-ring"></div>
     <p id="boot-text">INICIALIZANDO SISTEMAS…</p>
+    <ul class="boot-log" id="boot-log"></ul>
     <button id="boot-start" class="boot-start" hidden>TOQUE PARA INICIAR</button>
   </div>
 

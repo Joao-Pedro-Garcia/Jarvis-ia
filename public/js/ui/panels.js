@@ -3,63 +3,93 @@ import { $, $$, esc, toast, fmtDateTime, confirmButton } from './dom.js';
 import { openSheet } from './sheet.js';
 import { api } from '../core/api.js';
 import { getSettings, saveSettings } from '../core/settings.js';
-import { listVoices, voiceSupported } from '../modules/voice.js';
-import { hearingSupported, wakeStatus } from '../modules/hearing.js';
-import { clapStatus } from '../modules/clap.js';
+import { listVoices } from '../modules/voice.js';
+import { testMicrophone, notificationState, requestNotifications, notify } from '../modules/device.js';
 
 const KIND_LABEL = { facts: 'MEMÓRIA PERSISTENTE', preferences: 'PREFERÊNCIAS', tasks: 'TAREFAS' };
 
 // ---------------- MEMÓRIA ----------------
+function dueLabel(t) {
+  if (!t.dueAt) return '';
+  const d = new Date(t.dueAt);
+  const overdue = d < new Date() && t.status === 'pending';
+  return ` <span class="badge ${overdue ? 'warn' : ''}">${overdue ? 'ATRASADA · ' : ''}${d.toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', ...(t.hasTime ? { hour: '2-digit', minute: '2-digit' } : {}) })}</span>`;
+}
+
+function memItem(m, kind) {
+  const task = kind === 'tasks';
+  const status = task ? (m.status || (m.done ? 'done' : 'pending')) : null;
+  return `<li data-id="${m.id}" class="${status === 'done' ? 'done' : ''} ${status === 'cancelled' ? 'cancelled' : ''}">
+    ${task ? `<input type="checkbox" ${status === 'done' ? 'checked' : ''} aria-label="Concluída" ${status === 'cancelled' ? 'disabled' : ''}>` : ''}
+    <span class="t">${esc(m.text)}${task ? dueLabel(m) : ''}${status === 'cancelled' ? ' <span class="badge">CANCELADA</span>' : ''}</span>
+    ${m.protected ? '<button class="btn small" data-reveal>Mostrar</button>' : '<button class="btn small" data-edit>Editar</button>'}
+    ${task && status === 'pending' ? '<button class="btn small" data-postpone title="Adiar para amanhã 9h">Adiar</button><button class="btn small" data-cancel>Cancelar</button>' : ''}
+    <button class="btn small" data-del>Apagar</button>
+  </li>`;
+}
+
 export async function showMemory(sessionHistory = []) {
   openSheet('memory', 'MEMÓRIA', async (body) => {
     body.innerHTML = '<p class="muted">Carregando…</p>';
-    const data = await api.get('/api/memory').catch((e) => ({ error: e.message }));
+    const [data, taskRes, bible] = await Promise.all([api.get('/api/memory').catch((e) => ({ error: e.message })), api.get('/api/tasks?all=1').catch(() => ({ tasks: [] })), api.get('/api/bible/settings').catch(() => null)]);
     if (data.error) { body.innerHTML = `<div class="err-box">${esc(data.error)}</div>`; return; }
-    const section = (kind) => `
-      <fieldset class="fieldset"><legend>${KIND_LABEL[kind]}</legend>
-        <ul class="mem-list" data-kind="${kind}">${data[kind].length ? data[kind].map((m) => `
-          <li data-id="${m.id}" class="${m.done ? 'done' : ''}">
-            ${kind === 'tasks' ? `<input type="checkbox" ${m.done ? 'checked' : ''} aria-label="Concluída">` : ''}
-            <span class="t">${esc(m.text)}</span>
-            <button class="btn small" data-edit>Editar</button>
-            <button class="btn small" data-del>Apagar</button>
-          </li>`).join('') : '<li class="muted">Vazio.</li>'}</ul>
-        <form class="mem-add" data-kind="${kind}" style="display:flex;gap:8px"><input class="inline-input" style="flex:1" maxlength="1000" placeholder="Adicionar…" required><button class="btn small">Adicionar</button></form>
+    data.tasks = taskRes.tasks.filter((t) => t.status !== 'cancelled' || Date.now() - Date.parse(t.updatedAt || t.createdAt) < 7 * 86400000);
+    const section = (kind, title) => `
+      <fieldset class="fieldset"><legend>${title}</legend>
+        <ul class="mem-list" data-kind="${kind}">${data[kind].length ? data[kind].map((m) => memItem(m, kind)).join('') : '<li class="muted">Vazio.</li>'}</ul>
+        <form class="mem-add" data-kind="${kind}" style="display:flex;gap:8px;flex-wrap:wrap"><input class="inline-input" style="flex:1;min-width:160px" maxlength="1000" placeholder="Adicionar…" required>
+          ${kind === 'tasks' ? '<input class="inline-input" type="datetime-local" aria-label="Data e hora (opcional)">' : ''}<button class="btn small">Adicionar</button></form>
       </fieldset>`;
     body.innerHTML = `
-      <p class="hint">O JARVIS só guarda de forma permanente o que você autorizar (“lembre que…”). Senhas, cartões e documentos são bloqueados ou exigem confirmação.</p>
-      <div class="form-grid">${section('facts')}${section('preferences')}</div><br>${section('tasks')}<br>
-      <fieldset class="fieldset"><legend>MEMÓRIA DE SESSÃO (conversa atual — não é salva em disco)</legend>
+      <p class="hint">O JARVIS só guarda de forma permanente o que você autorizar (“lembre que…”). Senhas, cartões e documentos ficam <b>criptografados</b> e só aparecem após confirmação — nunca em voz alta.</p>
+      ${section('tasks', 'TAREFAS E LEMBRETES')}<br>
+      <div class="form-grid">${section('facts', 'MEMÓRIAS')}${section('preferences', 'PREFERÊNCIAS')}</div><br>
+      <fieldset class="fieldset"><legend>PROGRESSO DA BÍBLIA</legend><p class="hint" style="margin:0">Próxima leitura começa em <b>${esc(bible?.position ? `${bible.position.book.toUpperCase()} ${bible.position.chapter}` : '—')}</b> · ${bible?.chaptersPerDay ?? 3} capítulos por dia. Detalhes no leitor (diga “Bíblia”) e ajustes em Configurações.</p></fieldset><br>
+      <fieldset class="fieldset"><legend>SESSÃO (conversa atual — não é salva em disco)</legend>
         <ul class="mem-list">${sessionHistory.slice(-10).map((h) => `<li><span class="t"><b>${h.role === 'user' ? 'Você' : 'JARVIS'}:</b> ${esc(h.text.slice(0, 160))}</span></li>`).join('') || '<li class="muted">Vazia.</li>'}</ul>
       </fieldset><br>
-      <button class="btn danger" id="mem-clear">Apagar todas as memórias</button>`;
+      <button class="btn danger" id="mem-clear">Apagar todas as memórias e tarefas</button>`;
+    const reload = () => showMemory(sessionHistory);
     $$('.mem-list li[data-id]', body).forEach((li) => {
       const id = li.dataset.id;
-      confirmButton($('[data-del]', li), async () => { await api.del(`/api/memory/${id}`); li.remove(); toast('Memória apagada.'); }, 'Confirmar exclusão?');
-      $('[data-edit]', li).addEventListener('click', () => {
+      confirmButton($('[data-del]', li), async () => { await api.del(`/api/memory/${id}`); li.remove(); toast('Apagado.'); }, 'Confirmar exclusão?');
+      $('[data-edit]', li)?.addEventListener('click', () => {
         const span = $('.t', li);
-        const input = document.createElement('input'); input.className = 'inline-input'; input.value = span.textContent; input.maxLength = 1000;
+        const input = document.createElement('input'); input.className = 'inline-input'; input.value = span.textContent.replace(/\s+(seg|ter|qua|qui|sex|sáb|dom)\.?,.*$/i, ''); input.maxLength = 1000;
         span.replaceWith(input); input.focus();
-        const save = async () => { const item = await api.patch(`/api/memory/${id}`, { text: input.value }); const s = document.createElement('span'); s.className = 't'; s.textContent = item.text; input.replaceWith(s); toast('Memória editada.'); };
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') showMemory(sessionHistory); });
+        const save = async () => { await api.patch(`/api/memory/${id}`, { text: input.value }); toast('Editado.'); reload(); };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') reload(); });
         input.addEventListener('blur', save, { once: true });
       });
-      $('input[type=checkbox]', li)?.addEventListener('change', async (e) => { await api.patch(`/api/memory/${id}`, { done: e.target.checked }); li.classList.toggle('done', e.target.checked); });
+      const reveal = $('[data-reveal]', li);
+      if (reveal) confirmButton(reveal, async () => { const r = await api.post(`/api/memory/${id}/reveal`, { confirm: true }); $('.t', li).textContent = `🔓 ${r.text}`; reveal.remove(); }, 'Mostrar mesmo?');
+      $('input[type=checkbox]', li)?.addEventListener('change', async (e) => { await api.patch(`/api/tasks/${id}`, { action: e.target.checked ? 'done' : 'reopen' }); reload(); });
+      $('[data-postpone]', li)?.addEventListener('click', async () => {
+        const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0);
+        await api.patch(`/api/tasks/${id}`, { action: 'postpone', dueAt: d.toISOString(), hasTime: true }); toast('Adiado para amanhã às 9h.'); reload();
+      });
+      const cancel = $('[data-cancel]', li);
+      if (cancel) confirmButton(cancel, async () => { await api.patch(`/api/tasks/${id}`, { action: 'cancel' }); reload(); }, 'Cancelar mesmo?');
     });
     $$('.mem-add', body).forEach((f) => f.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = $('input', f);
-      try { await api.post('/api/memory', { kind: f.dataset.kind, text: input.value }); showMemory(sessionHistory); } catch (err) { toast(err.message); }
+      const [input, when] = $$('input', f);
+      try {
+        if (f.dataset.kind === 'tasks') await api.post('/api/tasks', { text: input.value, ...(when?.value ? { dueAt: new Date(when.value).toISOString(), hasTime: true } : {}) });
+        else await api.post('/api/memory', { kind: f.dataset.kind, text: input.value });
+        reload();
+      } catch (err) { toast(err.message); }
     }));
-    confirmButton($('#mem-clear', body), async () => { await api.del('/api/memory?confirm=true'); showMemory(sessionHistory); toast('Todas as memórias foram apagadas.'); }, 'Tem certeza? Toque de novo');
+    confirmButton($('#mem-clear', body), async () => { await api.del('/api/memory?confirm=true'); reload(); toast('Todas as memórias foram apagadas.'); }, 'Tem certeza? Toque de novo');
   });
 }
 
 // ---------------- CONFIGURAÇÕES ----------------
 export async function showSettings({ onChange } = {}) {
-  const [s, personality, bible, booksRes] = await Promise.all([
-    Promise.resolve(getSettings()), api.get('/api/personality').catch(() => null), api.get('/api/bible/settings').catch(() => null), api.get('/api/bible/books').catch(() => ({ books: [] })),
+  const [s, personality, bible, booksRes, status] = await Promise.all([
+    Promise.resolve(getSettings()), api.get('/api/personality').catch(() => null), api.get('/api/bible/settings').catch(() => null), api.get('/api/bible/books').catch(() => ({ books: [] })), api.get('/api/status').catch(() => null),
   ]);
+  const aiStatus = status?.llm;
   openSheet('settings', 'CONFIGURAÇÕES', (body) => {
     const voices = listVoices(s.voice.lang);
     body.innerHTML = `
@@ -71,6 +101,9 @@ export async function showSettings({ onChange } = {}) {
         <div class="field"><label>Volume: <span data-out="voice.volume">${s.voice.volume}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.voice.volume}" data-k="voice.volume" data-num></div>
         <div class="field"><label>Idioma da voz e do ouvido</label><select data-k="voice.lang" data-mirror="hearing.lang">${['pt-BR', 'pt-PT', 'en-US', 'es-ES'].map((l) => `<option ${l === s.voice.lang ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label>Máximo de caracteres falados</label><input type="number" min="100" max="3000" step="50" value="${s.voice.maxSpokenChars}" data-k="voice.maxSpokenChars" data-num></div>
+        <label class="switch">Modo silencioso (só texto) <input type="checkbox" data-k="voice.silent" ${s.voice.silent ? 'checked' : ''}></label>
+        <label class="switch">Interromper dizendo “pare” <input type="checkbox" data-k="voice.bargeIn" ${s.voice.bargeIn ? 'checked' : ''}></label>
+        <div class="field"><label>Tom (pitch): <span data-out="voice.pitch">${s.voice.pitch}</span></label><input type="range" min="0.5" max="1.5" step="0.05" value="${s.voice.pitch}" data-k="voice.pitch" data-num></div>
         <button class="btn small" id="test-voice" type="button">Testar voz</button>
       </fieldset>
       <fieldset class="fieldset"><legend>MICROFONE / OUVIDO</legend>
@@ -78,20 +111,32 @@ export async function showSettings({ onChange } = {}) {
         <label class="switch">Ativação por voz (“Jarvis, …”) <input type="checkbox" data-k="hearing.wakeWord" ${s.hearing.wakeWord ? 'checked' : ''}></label>
         <p class="hint">A ativação por voz mantém o reconhecimento do navegador ligado — no Chrome o áudio é processado pelo serviço do Google. Deixe desligado se preferir privacidade máxima.</p>
         <div class="field"><label>Silêncio para encerrar (ms): <span data-out="hearing.silenceMs">${s.hearing.silenceMs}</span></label><input type="range" min="800" max="4000" step="100" value="${s.hearing.silenceMs}" data-k="hearing.silenceMs" data-num></div>
-        <button class="btn small" id="test-mic" type="button">Testar permissão do microfone</button>
+        <button class="btn small" id="test-mic" type="button">🎙 Testar microfone (3 s)</button>
+        <div class="meter" id="set-mic-meter" hidden><span>Fale algo…</span><div class="meter-bar"><i id="set-mic-level"></i></div></div>
       </fieldset>
       <fieldset class="fieldset"><legend>PALMAS</legend>
         <label class="switch">Ativar com duas palmas <input type="checkbox" data-k="clap.enabled" ${s.clap.enabled ? 'checked' : ''}></label>
         <div class="field"><label>Sensibilidade: <span data-out="clap.sensitivity">${s.clap.sensitivity}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.clap.sensitivity}" data-k="clap.sensitivity" data-num></div>
+        <div class="field"><label>Intervalo mínimo entre palmas (ms): <span data-out="clap.minGapMs">${s.clap.minGapMs}</span></label><input type="range" min="60" max="400" step="10" value="${s.clap.minGapMs}" data-k="clap.minGapMs" data-num></div>
+        <div class="field"><label>Limiar manual (0 = automático): <span data-out="clap.thresholdOverride">${s.clap.thresholdOverride}</span></label><input type="range" min="0" max="0.6" step="0.01" value="${s.clap.thresholdOverride}" data-k="clap.thresholdOverride" data-num></div>
         <div class="field"><label>Intervalo máximo entre palmas (ms): <span data-out="clap.maxGapMs">${s.clap.maxGapMs}</span></label><input type="range" min="300" max="1500" step="50" value="${s.clap.maxGapMs}" data-k="clap.maxGapMs" data-num></div>
         <div class="field"><label>Tempo de espera após ativar (ms): <span data-out="clap.cooldownMs">${s.clap.cooldownMs}</span></label><input type="range" min="1000" max="8000" step="250" value="${s.clap.cooldownMs}" data-k="clap.cooldownMs" data-num></div>
-        <p class="hint">Use o medidor “Nível do microfone” (painel Sistema) para calibrar: a linha laranja é o limiar atual.</p>
+        <p class="hint">Calibre com o medidor “Nível do microfone” (painel Sistema): a linha laranja é o limiar atual. <b>Limitação:</b> para detecção contínua de palmas com a tela bloqueada, o navegador pode interromper o microfone em segundo plano — deixe o JARVIS aberto (use “Manter tela ligada”).</p>
       </fieldset>
       <fieldset class="fieldset"><legend>INTERFACE</legend>
         <div class="field"><label>Tema</label><select data-k="ui.theme">${[['ciano', 'Ciano'], ['ambar', 'Âmbar'], ['verde', 'Verde']].map(([v, l]) => `<option value="${v}" ${v === s.ui.theme ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label>Modo</label><select data-k="ui.mode"><option value="desempenho" ${s.ui.mode === 'desempenho' ? 'selected' : ''}>Desempenho (visual completo)</option><option value="economico" ${s.ui.mode === 'economico' ? 'selected' : ''}>Econômico (menos CPU/bateria)</option></select></div>
         <label class="switch">Animações <input type="checkbox" data-k="ui.animations" ${s.ui.animations ? 'checked' : ''}></label>
         <label class="switch">Partículas <input type="checkbox" data-k="ui.particles" ${s.ui.particles ? 'checked' : ''}></label>
+        <label class="switch">Manter tela ligada com o JARVIS aberto <input type="checkbox" data-k="ui.keepAwake" ${s.ui.keepAwake ? 'checked' : ''}></label>
+      </fieldset>
+      <fieldset class="fieldset"><legend>NOTIFICAÇÕES</legend>
+        <p class="hint" style="margin-top:0">Estado: <b id="notif-state">${{ granted: 'permitidas', denied: 'bloqueadas no navegador', default: 'não solicitadas', unsupported: 'não suportadas neste navegador' }[notificationState()]}</b>. Lembretes são avisados enquanto o JARVIS estiver aberto (inclusive em segundo plano, se o navegador permitir). Com o app totalmente fechado, não há aviso — isso exigiria um servidor de push.</p>
+        <button class="btn small" id="notif-btn" type="button" ${notificationState() === 'unsupported' ? 'disabled' : ''}>Permitir notificações</button>
+      </fieldset>
+      <fieldset class="fieldset"><legend>IA ONLINE</legend>
+        <p class="hint" style="margin-top:0">Status: <b>${aiStatus?.configured ? 'CONFIGURADA' : 'NÃO CONFIGURADA'}</b>${aiStatus?.configured ? ` · Provedor: ${esc(aiStatus.providerName)} · Modelo: ${esc(aiStatus.model)}${aiStatus.webSearch ? ' · pesquisa web' : ''}` : ' · modo local (comandos funcionam; conversa livre não).'}</p>
+        <p class="hint">A chave nunca aparece aqui: ela fica só no servidor, no arquivo <code>.env</code> (AI_PROVIDER, AI_API_KEY, AI_MODEL). Veja o README.</p>
       </fieldset>
       <fieldset class="fieldset"><legend>BÍBLIA</legend>
         <div class="field"><label>Capítulos por dia</label><input type="number" min="1" max="20" value="${bible?.chaptersPerDay ?? 3}" id="b-cpd"></div>
@@ -128,7 +173,14 @@ export async function showSettings({ onChange } = {}) {
     });
     $('#test-voice', body).addEventListener('click', () => onChange?.(getSettings(), 'test-voice'));
     $('#test-mic', body).addEventListener('click', async () => {
-      try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((t) => t.stop()); toast('Microfone liberado ✔'); } catch (e) { toast(`Microfone bloqueado: ${e.name}`); }
+      const meter = $('#set-mic-meter', body); meter.hidden = false;
+      const r = await testMicrophone({ onLevel: (v) => { $('#set-mic-level', body).style.width = `${Math.min(100, v * 160)}%`; } });
+      toast(`${r.ok ? '🟢' : '🔴'} ${r.reason}`, 5000);
+    });
+    $('#notif-btn', body).addEventListener('click', async () => {
+      const r = await requestNotifications();
+      $('#notif-state', body).textContent = { granted: 'permitidas', denied: 'bloqueadas no navegador', default: 'não solicitadas', unsupported: 'não suportadas' }[r];
+      if (r === 'granted') notify('JARVIS', 'Notificações ativadas. Vou avisar seus lembretes aqui.');
     });
     $('#b-save', body).addEventListener('click', async () => {
       await api.put('/api/bible/settings', { chaptersPerDay: Number($('#b-cpd', body).value), position: { book: $('#b-book', body).value, chapter: Number($('#b-ch', body).value) } });
@@ -140,46 +192,6 @@ export async function showSettings({ onChange } = {}) {
       await api.put('/api/personality', { nome_usuario: $('#p-user', body).value.trim(), nivel_humor: Number($('#p-humor', body).value), formalidade: Number($('#p-formal', body).value), nivel_detalhamento: $('#p-detail', body).value });
       toast('Personalidade salva.');
     });
-  });
-}
-
-// ---------------- DIAGNÓSTICO ----------------
-async function micPermission() {
-  try { const p = await navigator.permissions.query({ name: 'microphone' }); return p.state; } catch { return 'desconhecido'; }
-}
-
-export async function showDiagnostics() {
-  openSheet('diagnostics', 'DIAGNÓSTICO', async (body) => {
-    body.innerHTML = '<p class="muted">Verificando componentes…</p>';
-    const [status, logs, perm] = await Promise.all([api.get('/api/status').catch((e) => ({ error: e.message })), api.get('/api/logs?limit=150').catch(() => ({ logs: [] })), micPermission()]);
-    if (status.error) { body.innerHTML = `<div class="err-box">Servidor inacessível: ${esc(status.error)}</div>`; return; }
-    const st = (cls, label) => `<span class="st ${cls}">${label}</span>`;
-    const map = { online: st('ok', 'ONLINE'), client: st('ok', 'NAVEGADOR'), local: st('warn', 'MODO LOCAL'), offline: st('bad', 'OFFLINE'), unavailable: st('off', 'INDISPONÍVEL'), off: st('off', 'DESLIGADO') };
-    const clap = clapStatus(); const wake = wakeStatus();
-    const client = [
-      ['Reconhecimento de fala (OUVIDO)', hearingSupported ? st('ok', 'SUPORTADO') : st('bad', 'NÃO SUPORTADO'), hearingSupported ? 'Web Speech API (requer internet no Chrome).' : 'Use Chrome, Edge ou Android. Texto continua disponível.'],
-      ['Síntese de voz (VOZ)', voiceSupported ? st('ok', 'SUPORTADO') : st('bad', 'NÃO SUPORTADO'), `${listVoices('pt').length} voz(es) em português instaladas.`],
-      ['Permissão do microfone', perm === 'granted' ? st('ok', 'CONCEDIDA') : perm === 'denied' ? st('bad', 'NEGADA') : st('warn', String(perm).toUpperCase()), window.isSecureContext ? 'Contexto seguro (HTTPS/localhost).' : 'ATENÇÃO: microfone exige HTTPS ou localhost.'],
-      ['Detector de palmas', clap.running ? st('ok', 'ATIVO') : clap.enabled ? st('warn', 'PAUSADO') : st('off', 'DESLIGADO'), typeof AudioWorkletNode !== 'undefined' ? 'AudioWorklet disponível.' : 'Usando modo reserva (AnalyserNode).'],
-      ['Ativação por voz', wake.running ? st('ok', 'OUVINDO') : wake.enabled ? st('warn', 'AGUARDANDO') : st('off', 'DESLIGADA'), ''],
-      ['Internet (navegador)', navigator.onLine ? st('ok', 'ONLINE') : st('bad', 'OFFLINE'), ''],
-      ['Modo offline (Service Worker)', navigator.serviceWorker?.controller ? st('ok', 'ATIVO') : st('warn', 'INATIVO'), 'Interface fica disponível sem internet após a 1ª visita.'],
-    ];
-    body.innerHTML = `
-      <table class="diag-table"><tr><th>MÓDULO</th><th>STATUS</th><th>DETALHES</th><th>ÚLTIMA AÇÃO</th></tr>
-        ${status.modules.map((m) => `<tr><td>${esc(m.name)}</td><td>${map[m.status] || esc(m.status)}</td><td>${esc(m.info)}</td><td class="muted">${m.last ? `${esc(m.last.event)} · ${fmtDateTime(m.last.at)}` : '—'}</td></tr>`).join('')}
-      </table><br>
-      <table class="diag-table"><tr><th>NAVEGADOR / DISPOSITIVO</th><th>STATUS</th><th>DETALHES</th></tr>
-        ${client.map(([a, b, c]) => `<tr><td>${a}</td><td>${b}</td><td class="muted">${esc(c)}</td></tr>`).join('')}
-      </table><br>
-      <p class="hint">Servidor: ${status.online ? 'com internet' : 'SEM internet'} · IA: ${status.llm.configured ? esc(status.llm.model) : 'não configurada'} · Fuso: ${esc(status.timezone)} · Versão ${esc(status.version)}</p>
-      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between"><h4 style="font:600 11px var(--mono);letter-spacing:.2em;color:var(--accent)">LOGS RECENTES</h4>
-        <div><select id="log-filter" class="inline-input"><option value="">Todos</option><option value="error">Erros</option><option value="warn">Avisos</option></select> <button class="btn small" id="log-clear">Limpar logs</button></div></div>
-      <div class="log-list" id="log-list"></div>`;
-    const renderLogs = (list) => { $('#log-list', body).innerHTML = list.map((l) => `<div class="${l.level}">${fmtDateTime(l.at)} [${esc(l.level)}] ${esc(l.category)}: ${esc(l.message)}</div>`).join('') || '<div class="muted">Sem registros.</div>'; };
-    renderLogs(logs.logs);
-    $('#log-filter', body).addEventListener('change', async (e) => renderLogs((await api.get(`/api/logs?limit=150${e.target.value ? `&level=${e.target.value}` : ''}`)).logs));
-    confirmButton($('#log-clear', body), async () => { await api.del('/api/logs?confirm=true'); renderLogs([]); }, 'Confirmar?');
   });
 }
 
