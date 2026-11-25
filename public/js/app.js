@@ -13,8 +13,8 @@ import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
-import { $, $$, esc, toast, relTime } from './ui/dom.js';
-import { closeSheet, currentSheet } from './ui/sheet.js';
+import { $, $$, esc, toast, relTime, fmtDateTime, confirmButton } from './ui/dom.js';
+import { closeSheet, currentSheet, openSheet } from './ui/sheet.js';
 import { showBible, renderBibleMini, bibleActions, pageSize } from './ui/bible-reader.js';
 import { showNews, showStory } from './ui/news-panel.js';
 import { showMemory, showSettings, showModules, showHouse, showMenu } from './ui/panels.js';
@@ -387,10 +387,36 @@ $('#core-button').addEventListener('click', () => {
 $('#stop-btn').addEventListener('click', stopAll);
 $('#stop-speech').addEventListener('click', () => { stopAll(); updateTopStatus(); });
 $('#pause-btn').addEventListener('click', togglePause);
+// ============================================================ conversas por categoria
+async function showConversations(catId = null) {
+  openSheet('conversas', 'CONVERSAS', async (body) => {
+    body.innerHTML = '<p class="muted">Carregando…</p>';
+    if (!catId) {
+      const { categories } = await api.get('/api/conversations');
+      body.innerHTML = categories.length
+        ? `<div class="conv-cats">${categories.map((c) => `<button class="conv-cat" data-cat="${esc(c.id)}"><b>${esc(c.label)}</b><small>${c.count} mensagens · última: ${fmtDateTime(c.last)}</small></button>`).join('')}</div>`
+        : '<p class="muted">Nenhuma conversa salva ainda. Cada assunto vai para a sua categoria assim que você falar comigo.</p>';
+      body.querySelectorAll('.conv-cat').forEach((b) => b.addEventListener('click', () => showConversations(b.dataset.cat)));
+    } else {
+      const { items } = await api.get(`/api/conversations?category=${encodeURIComponent(catId)}`);
+      body.innerHTML = `<div class="diag-actions"><button class="btn small" id="conv-back">← Categorias</button></div>
+        <div class="conv-list">${items.map((m) => `<p class="conv-msg ${m.role}"><small>${fmtDateTime(m.at)} · ${m.role === 'user' ? 'VOCÊ' : 'JARVIS'}</small>${esc(m.text)}</p>`).join('') || '<p class="muted">Vazio.</p>'}</div>
+        <div class="diag-actions"><button class="btn" id="conv-clear">Apagar esta categoria</button></div>`;
+      body.querySelector('#conv-back').addEventListener('click', () => showConversations());
+      confirmButton(body.querySelector('#conv-clear'), async () => {
+        await api.del(`/api/conversations?category=${encodeURIComponent(catId)}&confirm=true`);
+        showConversations();
+      }, 'Confirmar?');
+    }
+  });
+}
+
 const PANELS = {
+  conversas: () => showConversations(),
   memory: () => showMemory(history), settings: openSettings, diagnostics: showDiagnostics, modules: showModules, house: showHouse,
   menu: () => showMenu({
     bible: () => handleInput('Bíblia'), news: () => handleInput('Notícias'), memory: () => showMemory(history), modules: showModules, house: showHouse, settings: openSettings, diagnostics: showDiagnostics,
+    conversas: () => showConversations(),
     clap: () => { const s = getSettings(); saveSettings({ clap: { enabled: !s.clap.enabled } }).then((n) => applySettings(n, 'clap.enabled')); closeSheet(); },
     stop: () => { stopAll(); closeSheet(); },
   }),
