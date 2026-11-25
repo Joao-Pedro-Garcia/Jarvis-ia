@@ -1,0 +1,13 @@
+{
+  "name": "JARVIS — Assistente Pessoal",
+  "short_name": "JARVIS",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#03070d",
+  "theme_color": "#03070d",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "_comment": "Fontes RSS usadas pelo módulo NOTÍCIAS. Edite livremente. priority: 1 (maior) a 3. category: br | world | science",
+  "feeds": [
+    { "name": "Agência Brasil", "url": "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml", "category": "br", "priority": 1, "official": true },
+    { "name": "g1", "url": "https://g1.globo.com/rss/g1/", "category": "br", "priority": 1 },
+    { "name": "g1 Economia", "url": "https://g1.globo.com/rss/g1/economia/", "category": "br", "priority": 1 },
+    { "name": "Folha Poder", "url": "https://feeds.folha.uol.com.br/poder/rss091.xml", "category": "br", "priority": 2 },
+    { "name": "Folha Mercado", "url": "https://feeds.folha.uol.com.br/mercado/rss091.xml", "category": "br", "priority": 2 },
+    { "name": "g1 Tocantins", "url": "https://g1.globo.com/rss/g1/to/tocantins/", "category": "br", "priority": 3 },
+    { "name": "BBC News Brasil", "url": "https://feeds.bbci.co.uk/portuguese/rss.xml", "category": "world", "priority": 1 },
+    { "name": "g1 Mundo", "url": "https://g1.globo.com/rss/g1/mundo/", "category": "world", "priority": 1 },
+    { "name": "Folha Mundo", "url": "https://feeds.folha.uol.com.br/mundo/rss091.xml", "category": "world", "priority": 2 },
+    { "name": "DW Brasil", "url": "https://rss.dw.com/rdf/rss-br-all", "category": "world", "priority": 2 },
+    { "name": "g1 Ciência e Saúde", "url": "https://g1.globo.com/rss/g1/ciencia-e-saude/", "category": "science", "priority": 1 },
+    { "name": "Folha Ciência", "url": "https://feeds.folha.uol.com.br/ciencia/rss091.xml", "category": "science", "priority": 2 },
+    { "name": "g1 Tecnologia", "url": "https://g1.globo.com/rss/g1/tecnologia/", "category": "science", "priority": 2 }
+  ]
+}
