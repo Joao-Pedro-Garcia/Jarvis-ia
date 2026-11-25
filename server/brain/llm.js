@@ -1,5 +1,8 @@
 // CAMADA DE IA (AI PROVIDER). Escolha por variável de ambiente:
-//   AI_PROVIDER = anthropic | openai | ollama | none   (padrão: anthropic se houver chave)
+//   AI_PROVIDER = auto (padrão) | local | ollama | anthropic | openai | none
+//     auto/local → procura uma IA LOCAL GRATUITA (Ollama, LM Studio, llama.cpp)
+//                  no próprio computador; sem ela, modo local inteligente.
+//     anthropic/openai → serviços online OPCIONAIS (exigem chave; podem ter custo).
 //   AI_API_KEY, AI_MODEL, AI_BASE_URL
 // Compatível com a configuração antiga (ANTHROPIC_API_KEY / JARVIS_MODEL).
 // Chaves ficam SOMENTE no servidor e nunca são enviadas ao navegador.
@@ -7,37 +10,80 @@ import { log } from '../core/logger.js';
 import { bus, EVENTS } from '../core/events.js';
 import { anthropicProvider } from './ai/anthropic.js';
 import { openAICompatibleProvider } from './ai/openai-compatible.js';
+import { localProvider, detectLocal, localInfo } from './ai/local.js';
 
-const PROVIDERS = { anthropic: anthropicProvider, openai: openAICompatibleProvider, ollama: openAICompatibleProvider, 'openai-compatible': openAICompatibleProvider };
+const CLOUD = { anthropic: anthropicProvider, openai: openAICompatibleProvider, 'openai-compatible': openAICompatibleProvider };
 let lastError = null;
 let lastOkAt = null;
 
+/** Identificador efetivo do provedor. */
+export function providerId() {
+  const raw = (process.env.AI_PROVIDER || '').trim().toLowerCase();
+  if (raw) return raw;
+  // Compatibilidade: uma chave antiga sem AI_PROVIDER continua valendo.
+  return process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'auto';
+}
+
 export function provider() {
-  const id = (process.env.AI_PROVIDER || 'anthropic').toLowerCase();
+  const id = providerId();
   if (id === 'none') return null;
-  return PROVIDERS[id] || null;
+  if (id === 'auto' || id === 'local') return localProvider;
+  // "ollama" com modelo definido: endereço fixo (comportamento da v2.0).
+  if (id === 'ollama') return process.env.AI_MODEL ? openAICompatibleProvider : localProvider;
+  return CLOUD[id] || null;
+}
+
+/** local | online | none */
+export function kind() {
+  const p = provider();
+  if (!p || !p.configured()) return 'none';
+  return p.local || providerId() === 'ollama' ? 'local' : 'online';
 }
 
 export const available = () => !!provider()?.configured();
 export const model = () => provider()?.model() ?? null;
+export const STATE_LABEL = { local: 'IA LOCAL', online: 'IA ONLINE', none: 'IA INDISPONÍVEL' };
 
 export function status() {
   const p = provider();
+  const id = providerId();
+  const k = kind();
+  const info = localInfo();
   return {
     configured: available(),
-    provider: p ? (process.env.AI_PROVIDER || 'anthropic').toLowerCase() : 'none',
-    providerName: p?.name ?? 'Nenhum',
+    kind: k,
+    state: STATE_LABEL[k],
+    provider: p ? id : 'none',
+    providerName: p ? (p.displayName?.() ?? p.name) : 'Nenhum',
     model: p?.model() ?? null,
+    free: k !== 'online',
     webSearch: !!p?.capabilities.webSearch && process.env.JARVIS_WEB_SEARCH !== '0',
     lastError, lastOkAt,
-    invalidProvider: !!process.env.AI_PROVIDER && !p && process.env.AI_PROVIDER !== 'none',
+    localProbe: (id === 'auto' || id === 'local' || (id === 'ollama' && !process.env.AI_MODEL)) ? { detected: info.detected && { name: info.detected.name, model: info.detected.model, models: info.detected.models.length }, lastCheck: info.lastProbe?.at || null, reason: info.lastProbe?.error || null } : null,
+    invalidProvider: !!process.env.AI_PROVIDER && !p && id !== 'none',
   };
+}
+
+let probing = null;
+/** Para provedores locais: (re)detecta a IA local no máximo a cada 30 s. */
+export async function refresh({ force = false } = {}) {
+  const p = provider();
+  if (p !== localProvider) return status();
+  const last = localInfo().lastProbe?.at;
+  if (force || !last || Date.now() - Date.parse(last) > 30000) {
+    probing ??= detectLocal().then((d) => {
+      if (d) log.info('cerebro', `IA local detectada: ${d.name} · modelo ${d.model}`);
+      return d;
+    }).finally(() => { probing = null; });
+    await probing;
+  }
+  return status();
 }
 
 /** Chamada genérica. Retorna { text } ou lança erro com mensagem amigável. */
 export async function complete({ system, messages, maxTokens = 1500, effort, webSearch = false, json = null, timeoutMs = 45000 }) {
   const p = provider();
-  if (!p || !p.configured()) throw Object.assign(new Error('IA não configurada (defina AI_PROVIDER e AI_API_KEY no .env)'), { code: 'NO_KEY' });
+  if (!p || !p.configured()) throw Object.assign(new Error('nenhuma IA disponível (instale uma IA local gratuita, como o Ollama, ou configure AI_PROVIDER no .env)'), { code: 'NO_KEY' });
   try {
     const out = await p.complete({ system, messages, maxTokens, effort, json, timeoutMs, webSearch: webSearch && p.capabilities.webSearch && process.env.JARVIS_WEB_SEARCH !== '0' });
     lastOkAt = new Date().toISOString();
@@ -47,6 +93,7 @@ export async function complete({ system, messages, maxTokens = 1500, effort, web
     const msg = p.friendlyError(err);
     lastError = { message: msg, at: new Date().toISOString() };
     log.error('cerebro', `Falha na IA (${p.id}): ${msg}`);
+    bus.emitEvent(EVENTS.API_FAILURE, { service: 'ia', message: msg });
     bus.emitEvent(EVENTS.LLM_ERROR, { message: msg });
     throw Object.assign(new Error(msg), { code: 'LLM_FAIL' });
   }

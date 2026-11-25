@@ -22,6 +22,7 @@ export const EVENTS = Object.freeze({
   SETTINGS_UPDATED: 'SETTINGS_UPDATED',
   REMINDER_DUE: 'REMINDER_DUE',
   TASK_UPDATED: 'TASK_UPDATED',
+  PALMS_DETECTED: 'PALMS_DETECTED',
 });
 
 class Bus extends EventEmitter {

@@ -24,6 +24,8 @@ const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
 
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+const { internetStatus } = await import('./core/http-client.js');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const TOKEN = process.env.JARVIS_ACCESS_TOKEN || '';
@@ -102,7 +104,7 @@ function serveStatic(req, res, url) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, 'Não encontrado');
     const ext = path.extname(file);
-    const cache = ext === '.html' || p === '/sw.js' ? 'no-cache' : 'public, max-age=300';
+    const cache = 'no-cache'; // sempre revalida: evita misturar versões antigas e novas do app
     res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, 'Content-Length': st.size });
     fs.createReadStream(file).pipe(res);
   });
@@ -116,7 +118,7 @@ bus.on('*', (evt) => {
 });
 setInterval(() => { for (const res of sseClients) res.write(': ping\n\n'); }, 25000).unref();
 
-const CLIENT_LOG_CATEGORIES = new Set(['palmas', 'ouvido', 'voz', 'permissoes', 'interface', 'erro-cliente']);
+const CLIENT_LOG_CATEGORIES = new Set(['palmas', 'ouvido', 'voz', 'permissoes', 'interface', 'erro-cliente', 'cerebro', 'notificacoes', 'pwa']);
 
 async function api(req, res, url) {
   const ip = req.socket.remoteAddress;
@@ -133,7 +135,7 @@ async function api(req, res, url) {
   switch (route) {
     case 'GET /api/status': {
       const st = await modulesStatus();
-      return send(res, 200, { ...st, llm: llm.status(), settings: getSettings(), personality: getPersonality(), recentCommands: getRecentCommands(), version: '2.0.0', serverTime: new Date().toISOString(), timezone: process.env.JARVIS_TIMEZONE || 'America/Araguaina' });
+      return send(res, 200, { ...st, llm: llm.status(), settings: getSettings(), personality: getPersonality(), recentCommands: getRecentCommands(), version: VERSION, serverTime: new Date().toISOString(), timezone: process.env.JARVIS_TIMEZONE || 'America/Araguaina' });
     }
     case 'POST /api/input': {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
@@ -198,9 +200,11 @@ async function api(req, res, url) {
       if (!String(body.text || '').trim()) return send(res, 400, { error: 'Texto obrigatório' });
       return send(res, 201, tasks.add(String(body.text).trim(), body.dueAt ? { dueAt: body.dueAt, hasTime: !!body.hasTime } : {}));
     }
+    case 'GET /api/internet': return send(res, 200, await internetStatus({ force: url.searchParams.get('force') === '1' }));
+    case 'GET /api/ai': return send(res, 200, await llm.refresh({ force: url.searchParams.get('force') === '1' }));
     case 'GET /api/selftest': {
       if (rateLimited(ip, 'selftest', 6)) return send(res, 429, { error: 'Aguarde antes de repetir o diagnóstico.' });
-      return send(res, 200, await selftest.runSelfTest({ includeAI: url.searchParams.get('ai') !== '0' }));
+      return send(res, 200, await selftest.runSelfTest({ includeAI: url.searchParams.get('ai') === '0' ? false : url.searchParams.get('ai') === '1' ? 'force' : true }));
     }
 
     // ---- Casa ----
@@ -268,10 +272,12 @@ export function createServer() {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'server', 'index.js')) {
   const { server, protocol } = createServer();
   tasks.startScheduler(Number(process.env.JARVIS_REMINDER_INTERVAL_MS) || 20000);
-  server.listen(PORT, HOST, () => {
+  server.listen(PORT, HOST, async () => {
     bus.emitEvent(EVENTS.ASSISTANT_STARTED, {});
-    log.info('sistema', `JARVIS online em ${protocol}://${HOST}:${PORT} · IA: ${llm.available() ? llm.model() : 'não configurada (modo local)'}`);
-    console.log(`\n  JARVIS online → ${protocol}://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}\n  IA: ${llm.available() ? llm.model() : 'não configurada (modo local) — defina ANTHROPIC_API_KEY no .env'}\n`);
+    const ai = await llm.refresh({ force: true }).catch(() => llm.status());
+    const aiText = ai.configured ? `${ai.state} — ${ai.providerName} · ${ai.model}` : 'IA INDISPONÍVEL — modo local inteligente (para IA gratuita, instale o Ollama: veja o README)';
+    log.info('sistema', `JARVIS online (v${VERSION}) em ${protocol}://${HOST}:${PORT} · ${aiText}`);
+    console.log(`\n  JARVIS online (v${VERSION}) → ${protocol}://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}\n  ${aiText}\n`);
   });
   const stop = () => { bus.emitEvent(EVENTS.ASSISTANT_STOPPED, {}); log.info('sistema', 'Encerrando JARVIS'); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1500).unref(); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);

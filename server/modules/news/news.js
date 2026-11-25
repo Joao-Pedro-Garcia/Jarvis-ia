@@ -9,7 +9,10 @@ import { formatDateTime } from '../../core/time.js';
 import * as llm from '../../brain/llm.js';
 import { getExchange } from './exchange.js';
 import { getFuel } from './fuel.js';
-import { fetchAll } from './feeds.js';
+import { fetchAll, lastSaved } from './feeds.js';
+
+export const NEWS_UNAVAILABLE = 'NÃO CONSEGUI CONFIRMAR AS NOTÍCIAS AGORA. Não consegui acessar as fontes de notícias neste momento.';
+const CACHE_MAX_H = 48;
 
 const HISTORY = 'news-history';
 const HISTORY_DAYS = 4;
@@ -137,7 +140,13 @@ export async function getSummary({ parts = ['exchange', 'fuel', 'brazil', 'world
   if (wantStories) {
     const h = history();
     if (!feeds.items.length) {
-      stories = { brazil: [], world: [], curiosity: null, error: 'Não consegui acessar as fontes de notícias neste momento.' };
+      stories = { brazil: [], world: [], curiosity: null, error: NEWS_UNAVAILABLE };
+      // Cache identificado: as últimas matérias que obtive, com data — nunca como atuais.
+      const saved = lastSaved();
+      if (saved.items.length && saved.fetchedAt && Date.now() - Date.parse(saved.fetchedAt) < CACHE_MAX_H * 3600e3) {
+        const sel = heuristicSelect(saved.items, { shown: [] });
+        stories.cached = { fetchedAt: saved.fetchedAt, brazil: sel.brazil.slice(0, 3), world: sel.world.slice(0, 3), curiosity: sel.curiosity };
+      }
     } else {
       try {
         stories = llm.available() ? await aiSelect(feeds.items, h) : heuristicSelect(feeds.items, h);
@@ -166,21 +175,26 @@ export function spokenMoney(v) {
 }
 
 export function exchangeText(ex, only) {
-  if (!ex?.ok) return { text: 'Não consegui confirmar a cotação atual neste momento.', speech: 'Não consegui confirmar a cotação atual neste momento.' };
+  if (!ex?.ok) {
+    const lk = ex?.lastKnown;
+    const rates = lk ? (only ? lk.rates.filter((r) => r.code === only) : lk.rates) : [];
+    const cache = rates.length ? `\nÚltima cotação obtida (CACHE de ${formatDateTime(new Date(lk.savedAt))} — pode não ser a atual):\n${rates.map((r) => `${r.flag} ${r.name}: R$ ${brl(r.value)} (${r.source})`).join('\n')}` : '';
+    return { text: `Não consegui confirmar a cotação atual neste momento.${cache}`, speech: `Não consegui confirmar a cotação atual neste momento.${cache ? ' Mostrei na tela a última cotação que obtive, com a data — ela pode não ser a atual.' : ''}` };
+  }
   const rates = only ? ex.rates.filter((r) => r.code === only) : ex.rates;
   if (!rates.length) return { text: 'Não consegui confirmar essa cotação agora.', speech: 'Não consegui confirmar essa cotação agora.' };
   const when = formatDateTime(new Date(rates[0].updatedAt));
   const text = rates.map((r) => `${r.flag} ${r.name}: R$ ${brl(r.value)}${r.changePct != null ? ` (${r.changePct >= 0 ? '▲' : '▼'} ${brl(Math.abs(r.changePct))}%)` : ''}`).join('\n')
-    + `\n${rates[0].kind} · atualizado em ${when} · ${rates[0].source}`;
+    + `\n${rates[0].kind} · atualizado em ${when}${ex.fromCache ? ' (cache de até 1 min)' : ''} · Fonte: ${rates[0].source}`;
   const speech = rates.map((r) => `${r.name === 'Libra' ? 'a libra' : `o ${r.name.toLowerCase()}`} está em ${spokenMoney(r.value)}${r.changePct != null && Math.abs(r.changePct) >= 0.05 ? `, ${r.changePct > 0 ? 'alta' : 'queda'} de ${brl(Math.abs(r.changePct), 1)} por cento` : ''}`).join('; ');
-  return { text, speech: `${speech.charAt(0).toUpperCase()}${speech.slice(1)}. Cotação ${rates[0].kind.toLowerCase()}, atualizada às ${when.split(' ')[1]}.` };
+  return { text, speech: `${speech.charAt(0).toUpperCase()}${speech.slice(1)}. Cotação ${rates[0].kind.toLowerCase()}, atualizada às ${when.split(' ')[1]}. Fonte: ${rates[0].source.replace(/\s*\(.*\)$/, '')}.` };
 }
 
 export function fuelText(f, which) {
   if (!f?.ok) {
     const lk = f?.lastKnown;
     const last = lk ? ` A última pesquisa que obtive é de ${lk.period.from.split('-').reverse().join('/')} a ${lk.period.to.split('-').reverse().join('/')} (consultada em ${formatDateTime(new Date(lk.savedAt))}) — pode não refletir os preços atuais.` : '';
-    return { text: `Não consegui confirmar os preços atuais.${last}`, speech: `Não consegui confirmar os preços atuais dos combustíveis.${lk ? ' Mostrei na tela a última pesquisa que obtive, com a data.' : ''}` };
+    return { text: `Dados indisponíveis no momento. Não consegui confirmar os preços atuais.${last}`, speech: `Dados indisponíveis no momento: não consegui confirmar os preços atuais dos combustíveis.${lk ? ' Mostrei na tela a última pesquisa que obtive, com a data.' : ''}` };
   }
   const filt = (arr) => arr.filter((p) => !which || (which === 'gasolina' ? /Gasolina/.test(p.product) : /Diesel/.test(p.product)));
   const line = (p) => `${p.product}: R$ ${brl(p.average)}/L`;
@@ -193,7 +207,7 @@ export function fuelText(f, which) {
 
 export function storiesSpeech(st) {
   if (!st) return '';
-  if (st.error) return st.error;
+  if (st.error) return `${st.error}${st.cached ? ' Mostrei na tela as últimas notícias que obtive, com a data e a hora — elas não foram confirmadas agora.' : ''}`;
   const say = (arr) => arr.slice(0, 3).map((s) => (s.repeated && s.update ? `Continua em destaque: ${s.title}. ${s.update}` : `${s.title}.`)).join(' ');
   let out = '';
   if (st.brazil.length) out += ` No Brasil: ${say(st.brazil)}`;

@@ -16,6 +16,8 @@ export const CATEGORIES = [
   { id: 'media', name: 'Televisão', domains: ['media_player'] },
   { id: 'computer', name: 'Computador', domains: ['button', 'switch'] },
   { id: 'sensor', name: 'Sensores', domains: ['sensor', 'binary_sensor'] },
+  { id: 'door', name: 'Portas e fechaduras', domains: ['lock', 'cover'] },
+  { id: 'camera', name: 'Câmeras', domains: ['camera'] },
   { id: 'automation', name: 'Automações', domains: ['automation', 'script', 'scene'] },
 ];
 
@@ -31,7 +33,7 @@ const homeAssistant = {
     const res = await fetchWithTimeout(`${process.env.HOME_ASSISTANT_URL.replace(/\/$/, '')}/api/states`, { headers: this.headers(), timeout: 8000 });
     const states = await res.json();
     return states
-      .filter((s) => /^(light|switch|climate|media_player|sensor|binary_sensor|button|script|scene|automation|fan|cover)\./.test(s.entity_id))
+      .filter((s) => /^(light|switch|climate|media_player|sensor|binary_sensor|button|script|scene|automation|fan|cover|lock|camera)\./.test(s.entity_id))
       .map((s) => ({ id: s.entity_id, domain: s.entity_id.split('.')[0], name: s.attributes?.friendly_name || s.entity_id, state: s.state, unit: s.attributes?.unit_of_measurement }));
   },
   async call(domain, service, entityId, data = {}) {
@@ -50,7 +52,7 @@ export function integrations() {
 export async function status() {
   const active = ADAPTERS.filter((a) => a.configured());
   if (!active.length) {
-    return { available: false, reason: 'Nenhuma integração doméstica configurada (defina HOME_ASSISTANT_URL e HOME_ASSISTANT_TOKEN no .env).', categories: CATEGORIES.map((c) => ({ ...c, available: false, devices: [] })), integrations: integrations() };
+    return { available: false, state: 'AGUARDANDO CONFIGURAÇÃO', reason: 'CASA = AGUARDANDO CONFIGURAÇÃO. Nenhuma integração doméstica configurada (defina HOME_ASSISTANT_URL e HOME_ASSISTANT_TOKEN no .env; o Home Assistant é gratuito e open source). Nenhum dispositivo é simulado.', categories: CATEGORIES.map((c) => ({ ...c, available: false, devices: [] })), integrations: integrations() };
   }
   try {
     const devices = (await Promise.all(active.map((a) => a.devices().then((d) => d.map((x) => ({ ...x, adapter: a.id })))))).flat();

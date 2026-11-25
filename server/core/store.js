@@ -42,3 +42,31 @@ export function update(name, fallback, fn) {
 
 /** Usado pelos testes para começar do zero. */
 export function clearCache() { cache.clear(); }
+
+/**
+ * Cópia de segurança de um arquivo de dados ANTES de qualquer migração de
+ * estrutura (data/backups/<nome>-<data>.json). Nunca apaga o original.
+ * Retorna o caminho da cópia, ou null se o arquivo ainda não existir.
+ */
+export function backup(name, reason = 'migracao') {
+  const p = filePath(name);
+  if (!fs.existsSync(p)) return null;
+  const dir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, `${path.basename(p, '.json')}-${reason}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  fs.copyFileSync(p, dest);
+  return dest;
+}
+
+/**
+ * Migração automática e segura: se `data._schema` for menor que `version`,
+ * faz backup, aplica `fn(data)` e grava com o novo número de versão.
+ */
+export function migrate(name, fallback, version, fn) {
+  const data = load(name, fallback);
+  if ((data._schema || 1) >= version) return data;
+  backup(name, `v${data._schema || 1}-para-v${version}`);
+  const next = fn(structuredClone(data)) || data;
+  next._schema = version;
+  return save(name, next);
+}

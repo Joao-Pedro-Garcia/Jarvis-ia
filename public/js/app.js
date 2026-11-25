@@ -19,6 +19,7 @@ import { showBible, renderBibleMini, bibleActions, pageSize } from './ui/bible-r
 import { showNews, showStory } from './ui/news-panel.js';
 import { showMemory, showSettings, showModules, showHouse, showMenu } from './ui/panels.js';
 import { showDiagnostics, runSelfTest } from './ui/diagnostics.js';
+import { checkBrowserAI, browserAIState, askBrowserAI } from './modules/browser-ai.js';
 
 const sessionId = (() => { try { let id = sessionStorage.getItem('jarvis.session'); if (!id) { id = crypto.randomUUID(); sessionStorage.setItem('jarvis.session', id); } return id; } catch { return 'default'; } })();
 const startedAt = Date.now();
@@ -110,7 +111,15 @@ async function handleInput(text, source = 'text') {
   }
   busy = false;
   $('#sys-latency').textContent = `${Math.round(performance.now() - t0)} ms`;
-  $('#sys-tone').textContent = (res.tone || '—').toUpperCase();
+  $('#sys-tone').textContent = (res.mode || res.tone || '—').toUpperCase();
+  // IA do navegador como reserva gratuita: só quando o servidor não tem IA e o navegador tem.
+  if (res.wantsAI && browserAIState().availability === 'available') {
+    try {
+      setState('thinking', 'IA DO NAVEGADOR');
+      const answer = await askBrowserAI(text);
+      if (answer) res = { ...res, text: answer, speech: answer, intent: 'conversation.browser-ai', source: 'IA do navegador', success: true };
+    } catch (err) { clientLog('cerebro', `IA do navegador falhou: ${err.message}`, 'warn'); }
+  }
   bus.emit(EVENTS.RESPONSE_RECEIVED, res);
   if (res.intent) { bus.emit(EVENTS.COMMAND_DETECTED, res); recentCommand(res.intent, res.module, res.success !== false || /^conversation/.test(res.intent)); }
   addMsg('jarvis', res.text, { tag: res.module, confirm: res.awaitingConfirmation });
@@ -168,7 +177,7 @@ function applyUi(res) {
 // ============================================================ ouvido
 async function startListening({ chime = true, greet = null } = {}) {
   if (!hearingSupported) {
-    addMsg('system', 'Reconhecimento de voz não suportado neste navegador (use Chrome, Edge ou Android). Você pode digitar.');
+    addMsg('system', 'Reconhecimento de voz não suportado neste navegador. Digite seu comando no campo abaixo (para falar, use Chrome, Edge ou o navegador do Android).');
     $('#command-input').focus();
     return;
   }
@@ -205,12 +214,16 @@ bus.on('mic:state', () => updateChips());
 bus.on(EVENTS.VOICE_INTERIM, ({ text }) => { $('#interim').textContent = text; core?.pulse(0.25); });
 bus.on(EVENTS.SPEECH_BOUNDARY, () => core?.pulse(0.35));
 bus.on(EVENTS.STATE_CHANGED, ({ next }) => { core?.setState(next); updateChips(); });
+bus.on(EVENTS.SPEECH_STARTED, () => updateTopStatus());
+bus.on(EVENTS.SPEECH_FINISHED, () => updateTopStatus());
 bus.on(EVENTS.CLAP_LEVEL, ({ peak, threshold }) => {
   $('#mic-level').style.width = `${Math.min(100, peak * 100)}%`;
   $('#clap-threshold').style.left = `${Math.min(99, threshold * 100)}%`;
 });
 bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
-bus.on(EVENTS.DOUBLE_CLAP, () => {
+// PALMS_DETECTED: duas palmas reconhecidas → "Sim?" → ouvir → cérebro → resposta.
+bus.on(EVENTS.PALMS_DETECTED, (evt) => {
+  if (evt?.test) return; // teste do diagnóstico: não inicia conversa
   if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
@@ -230,13 +243,31 @@ function chip(id, cls, title) { const el = $(id); el.classList.remove('ok', 'war
 function updateChips() {
   const internet = navigator.onLine && lastStatus?.online !== false;
   chip('#chip-net', !serverReachable ? 'bad' : internet ? 'ok' : 'warn', !serverReachable ? 'Servidor inacessível' : internet ? 'Online' : 'Modo offline');
-  chip('#chip-ai', lastStatus?.llm?.configured ? (internet ? 'ok' : 'warn') : 'warn', lastStatus?.llm?.configured ? `IA: ${lastStatus.llm.providerName} · ${lastStatus.llm.model}` : 'IA não configurada (modo local)');
+  chip('#chip-ai', lastStatus?.llm?.configured ? (lastStatus.llm.kind === 'local' || internet ? 'ok' : 'warn') : 'warn', lastStatus?.llm?.configured ? `${lastStatus.llm.state}: ${lastStatus.llm.providerName} · ${lastStatus.llm.model}` : 'IA INDISPONÍVEL (modo local inteligente)');
   const mic = micStatus();
   chip('#chip-mic', isListening() ? 'ok active' : mic === 'denied' || mic === 'unavailable' || !hearingSupported ? 'bad' : '', `Microfone: ${MIC_LABEL[mic]}${hearingSupported ? '' : ' · reconhecimento indisponível'}`);
   const ws = wake?.status() || {};
   chip('#chip-clap', ws.clap?.running ? 'ok' : ws.clap?.enabled ? 'warn' : '', ws.detail);
   document.body.classList.toggle('silent', !!getSettings()?.voice?.silent);
   $('#sys-mode').textContent = `${getSettings()?.security?.safeMode ? 'SEGURO · ' : ''}${getSettings()?.ui?.mode === 'economico' ? 'ECONÔMICO' : 'DESEMPENHO'}`;
+  updateTopStatus();
+}
+
+/** Estado no topo: ONLINE · OUVINDO · PROCESSANDO · FALANDO · OFFLINE · LIMITADO. */
+function updateTopStatus() {
+  const el = $('#jarvis-status'); if (!el) return;
+  const st = getState();
+  const net = lastStatus?.internet?.state;
+  let label, cls, why;
+  if (st === 'listening') { label = 'OUVINDO'; cls = 'active'; why = 'Microfone ativo'; }
+  else if (st === 'thinking') { label = 'PROCESSANDO'; cls = 'active'; why = 'Processando o pedido'; }
+  else if (st === 'speaking' || isSpeaking()) { label = 'FALANDO'; cls = 'active'; why = 'Respondendo em voz alta'; }
+  else if (!serverReachable) { label = 'OFFLINE'; cls = 'bad'; why = 'Servidor do JARVIS inacessível: só funções locais do aparelho.'; }
+  else if (!navigator.onLine || lastStatus?.online === false || net === 'offline') { label = 'OFFLINE'; cls = 'bad'; why = 'Sem internet: Bíblia, memória, tarefas e cálculos funcionam; notícias e câmbio não.'; }
+  else if (net === 'limited') { label = 'LIMITADO'; cls = 'warn'; why = `Internet limitada (${lastStatus.internet.label}).`; }
+  else { label = 'ONLINE'; cls = 'ok'; why = `Sistemas online · ${lastStatus?.llm?.state || ''}`; }
+  el.textContent = label; el.className = `sys-badge ${cls}`; el.title = why;
+  const stopBtn = $('#stop-speech'); if (stopBtn) stopBtn.hidden = !(isSpeaking() || isPaused() || st === 'speaking');
 }
 
 function updateBanner() {
@@ -316,6 +347,7 @@ $('#command-form').addEventListener('submit', (e) => {
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
 $('#core-button').addEventListener('click', () => (isSpeaking() || isPaused() ? stopAll() : startListening()));
 $('#stop-btn').addEventListener('click', stopAll);
+$('#stop-speech').addEventListener('click', () => { stopAll(); updateTopStatus(); });
 $('#pause-btn').addEventListener('click', togglePause);
 const PANELS = {
   memory: () => showMemory(history), settings: openSettings, diagnostics: showDiagnostics, modules: showModules, house: showHouse,
@@ -417,9 +449,11 @@ async function boot() {
   }
   // Sequência de inicialização com o estado REAL de cada parte.
   const ai = lastStatus?.llm;
-  await bootLog(serverReachable ? (ai?.configured ? `Cérebro online · IA ${ai.providerName}` : 'Cérebro online · modo local (IA não configurada)') : 'Cérebro: servidor inacessível — funções locais', serverReachable);
+  await bootLog(serverReachable ? (ai?.configured ? `Cérebro online · ${ai.state || 'IA'} ${ai.providerName}` : 'Cérebro online · modo local inteligente (IA não configurada)') : 'Cérebro: servidor inacessível — funções locais', serverReachable);
   await bootLog(hearingSupported && window.isSecureContext ? 'Ouvido online.' : hearingSupported ? 'Ouvido: requer HTTPS.' : 'Ouvido indisponível neste navegador.', hearingSupported && window.isSecureContext);
   await bootLog(voiceSupported ? 'Voz online.' : 'Voz indisponível neste navegador.', voiceSupported);
+  const bai = await checkBrowserAI().catch(() => null);
+  if (!ai?.configured && bai?.availability === 'available') await bootLog('IA do navegador disponível (reserva gratuita).');
   await bootLog(serverReachable ? 'Memória online.' : 'Memória: aguardando servidor.', serverReachable);
   if (serverReachable && lastStatus?.online === false) await bootLog('Modo offline: sem internet no servidor.', false);
   await bootLog('JARVIS pronto.');
@@ -458,7 +492,7 @@ async function boot() {
     const cmd = new URLSearchParams(location.search).get('cmd');
     const SHORT = { biblia: 'Bíblia', noticias: 'Notícias', 'meu-dia': 'Meu dia' };
     if (SHORT[cmd]) { window.history.replaceState(null, '', '/'); setTimeout(() => handleInput(SHORT[cmd]), 400); }
-    addMsg('jarvis', `${greet} ${!serverReachable ? OFFLINE_NOTICE : ai?.configured ? 'Como posso ajudar?' : 'Estou no modo local (IA conversacional não configurada no servidor). Diga “ajuda” para ver os comandos.'}`, { tag: 'SISTEMA' });
+    addMsg('jarvis', `${greet} ${!serverReachable ? OFFLINE_NOTICE : ai?.configured ? `Como posso ajudar? (${ai.state})` : 'Estou no modo local inteligente (IA conversacional não configurada no servidor). Diga “ajuda” para ver os comandos.'}`, { tag: 'SISTEMA' });
     say(greet);
   }, { once: true });
 }

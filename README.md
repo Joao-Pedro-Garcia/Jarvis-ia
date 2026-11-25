@@ -1,10 +1,14 @@
-# JARVIS — Assistente Pessoal Inteligente (v2)
+# JARVIS — Assistente Pessoal Inteligente (v2.1)
 
 Assistente pessoal com voz, audição, **ativação por duas palmas**, interface futurista,
 memória, tarefas e lembretes, **leitura da Bíblia com continuidade**, notícias, câmbio e
 combustíveis, módulos de engenharia e motores, e base para casa inteligente.
 
-- **Servidor:** Node.js 18+ puro. Única dependência: `@anthropic-ai/sdk`.
+- **Custo zero:** nada pago é obrigatório. IA **local e gratuita** (Ollama/LM Studio/llama.cpp),
+  ou **modo local inteligente** sem IA nenhuma. Fontes de dados públicas e gratuitas (RSS, Banco
+  Central, ANP). Voz e ouvido nativos do navegador.
+- **Servidor:** Node.js 18+ puro. Única dependência: `@anthropic-ai/sdk` (biblioteca gratuita;
+  só é usada se você escolher, opcionalmente, um provedor online).
 - **Interface:** HTML/CSS/JS sem etapa de build. **PWA instalável** no Android e no PC.
 - **Dados:** JSON locais em `data/` (não versionados). Nada vai para a nuvem, exceto o que
   você envia à IA (se configurada) e o reconhecimento de fala do navegador.
@@ -63,32 +67,48 @@ Diga **“faça um diagnóstico”** ou toque em **Diagnóstico** (tecla D no PC
 HTTPS, permissão, microfone, reconhecimento e notificações com 🟢/🟡/🔴, e o botão
 **Testar microfone** grava 3 s de áudio de verdade e diz se captou som.
 
-## 3. IA online (conversa livre)
+## 3. IA gratuita (conversa livre)
 
-Configure no `.env` (a chave fica **só no servidor**):
+Ordem de prioridade (tudo gratuito, nada obrigatório):
 
-```ini
-AI_PROVIDER=anthropic          # anthropic | openai | ollama | none
-AI_API_KEY=sua-chave
-AI_MODEL=                      # vazio = padrão do provedor (anthropic → claude-opus-5-5)
-```
-- `openai` aceita qualquer API compatível com *Chat Completions* (ajuste `AI_BASE_URL`).
-- `ollama` usa um modelo local no seu PC, sem chave (`AI_MODEL=llama3.2`).
-- A versão 1 (`ANTHROPIC_API_KEY`) continua funcionando.
+| # | Opção | Custo | Como ativar | Estado no diagnóstico |
+|---|---|---|---|---|
+| 1 | **IA local** (Ollama, LM Studio ou llama.cpp no seu PC) | grátis, roda offline | instale e deixe aberto — o JARVIS detecta sozinho | **IA LOCAL** |
+| 2 | **IA do navegador** (Chrome com IA embutida, Prompt API) | grátis, no aparelho | automático quando o navegador oferece | **IA DO NAVEGADOR** |
+| 3 | **Modo local inteligente** (regras, contexto, memória, cálculos, base técnica) | grátis, offline | sempre ativo | **IA INDISPONÍVEL** (o resto funciona) |
+| — | Provedor online (Anthropic/OpenAI) — *opcional* | pode ter custo | `AI_PROVIDER` + `AI_API_KEY` no `.env` | **IA ONLINE** |
 
-O status aparece em **Configurações → IA ONLINE** e no diagnóstico (provedor e modelo, nunca a chave).
-**Sem IA**, o JARVIS diz claramente que a IA externa não está configurada e continua fazendo
-tudo que é local: comandos, Bíblia, memória, tarefas, contas, conversões, rotina e configurações.
-Para provedores novos, crie um arquivo em `server/brain/ai/` com `complete()` e registre em `llm.js`.
+**IA local em 3 passos (recomendado):**
+1. Instale o Ollama: <https://ollama.com/download> (gratuito, open source).
+2. Baixe um modelo leve: `ollama pull llama3.2:3b` (≈2 GB; roda em PC comum sem placa de vídeo).
+3. Deixe o Ollama aberto e inicie o JARVIS. O terminal e o diagnóstico mostram **IA LOCAL**.
+
+`.env` (opcional): `AI_PROVIDER=auto` (padrão), `AI_MODEL=` (vazio = primeiro modelo de conversa
+instalado), `AI_BASE_URL=` (outro computador da rede). O JARVIS volta a procurar a IA local a cada
+30 s, então pode abrir o Ollama depois. Se a IA local parar no meio da conversa, ele avisa e
+responde no modo local.
+
+**Modo local inteligente (sem IA):** entende os comandos, acolhe desabafos com naturalidade
+(escuta, acompanha a conversa e oferece o CVV 188 quando o assunto pesa), conta piadas leves,
+explica conceitos de motor e engenharia de uma base local revisada (torque, potência, relação de
+marcha, injeção, turbo, pressão, energia, lei de Ohm…), explica o último cálculo (“me explica
+isso”) e, quando não sabe, **diz que não sabe** — nunca finge ser uma IA.
+
+Provedores online continuam suportados (`AI_PROVIDER=anthropic|openai`, chave só no servidor),
+mas **nenhuma função depende deles**. Para provedores novos, crie um arquivo em `server/brain/ai/`.
 
 ## 4. O que funciona offline e online
 
 | Sem internet (servidor acessível) | Precisa de internet |
 |---|---|
-| Interface, Bíblia já baixada, memória, tarefas e lembretes, contas, conversões, cálculos de motor, rotina, configurações, voz | IA externa (exceto Ollama local), notícias, câmbio, combustíveis, reconhecimento de fala do Chrome, Home Assistant fora da rede |
+| Interface, Bíblia já baixada, memória, tarefas e lembretes, contas, conversões, cálculos de motor e física, IA local (Ollama), modo local inteligente, rotina, revisão, configurações, voz | IA online opcional, notícias, câmbio, combustíveis (sem internet: cache **rotulado** com data), reconhecimento de fala do Chrome, Home Assistant fora da rede |
+
+Estados da internet do servidor (diagnóstico e topo da tela): **ONLINE**, **INTERNET LIMITADA**
+(parte dos pontos de teste responde ou latência alta), **OFFLINE**, e por serviço: **SERVIÇO EXTERNO
+INDISPONÍVEL**. Rota `GET /api/internet` mostra latência e cada ponto de teste.
 
 Se a internet cair aparece **“📡 MODO OFFLINE”**. Se o **servidor** ficar inacessível aparece
-**“SERVIDOR INACESSÍVEL”** e o navegador ainda responde hora, data, contas e conversões, e mostra a
+**“SERVIDOR INACESSÍVEL”** e o navegador ainda responde hora, data, contas, conversões e cálculos de motor/física, e mostra a
 última página da Bíblia salva (sem registrar progresso).
 
 ## 5. Comandos (diga “ajuda”)
@@ -102,8 +122,10 @@ Se a internet cair aparece **“📡 MODO OFFLINE”**. Se o **servidor** ficar 
 | 🗓 Rotina | “meu dia” (atrasadas → hoje → Bíblia → câmbio → próximos) |
 | 🔇 Voz | “fique silencioso”, “volte a falar”, “pare”, “pausa”, “continua a falar” |
 | 📊 Sistema | “status”, “faça um diagnóstico”, “ajuda”, “modo seguro” |
-| 🔧 Engenharia / 🚗 Motor | “15% de 230”, “converter 32 psi em bar”, “12 volts e 4 ohms”, “potência com 300 Nm a 4000 rpm”, “me ajuda com esse motor” (IA) |
-| 🏠 Casa | “ligar a luz da sala” (requer Home Assistant; sem ele aparece **NÃO CONFIGURADO**) |
+| 🔧 Engenharia / 🚗 Motor | “15% de 230”, “converta 100 km/h para m/s”, “12 volts e 4 ohms”, “potência com 300 Nm a 4000 rpm”, “se eu andar a 80 km/h durante 12 minutos, quantos km percorro?”, “quanto tempo para 150 km a 90 km/h”, “qual a força para 10 kg a 9,8 m/s²”, “pressão de 500 N em 2 m²”, “energia cinética de 1000 kg a 20 m/s”, “autonomia com 40 litros a 12 km/l”, “quanto gasto em 300 km com 10 km/l e gasolina a 6,20”, “quantos rpm a 100 km/h com marcha 0,8 diferencial 4,1 pneu 195/60 R15”, “o que é torque?”, “me explica isso” |
+| 🧮 Cálculo / Revisão | “me ajude a calcular”, “faça uma conta”, “faça uma revisão”, “crie uma tarefa” (pergunta qual) |
+| 💬 Conversa | “preciso conversar”, “estou mal hoje”, “conta uma piada”, “me ajuda com isso” — com IA local, conversa livre |
+| 🏠 Casa | “ligar a luz da sala” (requer Home Assistant, gratuito; sem ele aparece **AGUARDANDO CONFIGURAÇÃO** — nenhum dispositivo é simulado) |
 
 Frases não precisam ser exatas: o JARVIS tolera variações e erros comuns de transcrição
 (“notisias”, “gazolina”) e usa o **contexto real da tela**: “avança/volta” só mexem na Bíblia
@@ -121,19 +143,25 @@ Atalhos no PC: **Espaço** falar · **Esc** parar/fechar · **P** pausar fala ·
 - Texto: Almeida Corrigida Fiel (ACF), baixado uma vez para uso pessoal (não redistribuído).
 
 ## 7. Notícias, câmbio e combustíveis
-- **Câmbio:** AwesomeAPI (cotação comercial, com horário e variação); se falhar, **PTAX do
-  Banco Central** (rotulada como PTAX). Cache de 1 min. Sem fonte: “Não consegui confirmar a
-  cotação atual neste momento.”
+- **Câmbio (dólar, euro, libra):** fontes gratuitas, sem chave, em ordem: (A) AwesomeAPI (cotação
+  comercial, horário e variação do dia) → (B) **PTAX do Banco Central** (oficial; variação contra o
+  boletim anterior) → (C) **Banco Central Europeu** via api.frankfurter.app (referência diária) →
+  (D) **última cotação obtida, rotulada “CACHE — NÃO CONFIRMADO AGORA”** com data e hora → mensagem
+  “Não consegui confirmar a cotação atual neste momento.” Cache de 1 min; falhas não ficam em cache
+  por mais de 60 s.
 - **Combustíveis:** ANP — Levantamento de Preços. Ordem das fontes: (1) planilha semanal das
   últimas 4 semanas; (2) série mensal, localizada automaticamente na página de dados abertos da
   ANP. Mostra Tocantins e Brasil com **Gasolina comum, Diesel comum e Diesel S‑10 separados**,
   média simples, período e fonte. Pesquisa com mais de 14 dias recebe aviso. Se nada responder:
-  **“Não consegui confirmar os preços atuais.”** — a última pesquisa obtida pode aparecer, mas
+  **“Dados indisponíveis no momento. Não consegui confirmar os preços atuais.”** — a última pesquisa obtida pode aparecer, mas
   **separada e com a data**, nunca como atual. O portal gov.br às vezes recusa acessos automatizados;
   o JARVIS **não tenta contornar** esse bloqueio.
 - **Notícias:** RSS de Agência Brasil, g1, Folha, BBC News Brasil e DW (`config/news-sources.json`).
   Só matérias com data e das últimas 36 h, com fonte e horário. Repetidas viram “continua em
-  destaque”. Com IA, a seleção/resumo só pode usar matérias reais dos feeds.
+  destaque”. Com IA, a seleção/resumo só pode usar matérias reais dos feeds. Resumo: 3–5 do Brasil,
+  3–5 do mundo e 1 curiosidade. Se todas as fontes falharem: **“NÃO CONSEGUI CONFIRMAR AS NOTÍCIAS
+  AGORA.”** e, se houver, as últimas notícias salvas (até 48 h) aparecem em um bloco **CACHE** com a
+  data e hora em que foram obtidas.
 
 ## 8. Palmas
 **Configurações → PALMAS**: ativar, sensibilidade, intervalo mínimo e máximo, limiar manual
@@ -186,28 +214,29 @@ O orquestrador transforma o retorno em resultado estruturado
 ## 12. Testes
 
 ```bash
-npm test        # 194 testes automatizados (sem internet)
-npm run e2e     # teste final no navegador (requer Playwright + Chromium) — 27 etapas
+npm test        # 221 testes automatizados (sem internet): 194 originais + 27 da v2.1
+npm run e2e     # teste final no navegador (requer Playwright + Chromium) — 34 etapas
 ```
 
 | Tipo | Cobertura |
 |---|---|
-| Unitários/integração (`tests/*.test.js`) | intenções (~150 frases), orquestrador, Bíblia, memória, dados sensíveis, tarefas/datas/agendador, contas/conversões, parsing de APIs (amostra real da AwesomeAPI), fallbacks, rede lenta/fora/erro/JSON inválido, provedores de IA (simulados), segurança HTTP real (token, CSRF, path traversal), palmas (sinais sintéticos) |
-| E2E (`tests/e2e/run-e2e.js`) | Chromium real; **palmas por áudio real** (WAV no microfone falso); teste de microfone com `getUserMedia`; modo offline; reinício do servidor; persistência; layout Pixel 7; PWA (manifest, ícones, service worker) |
+| Unitários/integração (`tests/*.test.js`) | v2.1 (`tests/v21.test.js`): física/motor, frases do usuário → módulo, modo local inteligente, IA local (detecção Ollama/LM Studio simulada), estados LOCAL/ONLINE/INDISPONÍVEL, internet ONLINE/LIMITADA/OFFLINE, cache de falhas, câmbio BCE/PTAX/cache rotulado, notícias em cache, diagnóstico verdadeiro, casa, migração com backup; v2.0: intenções (~150 frases), orquestrador, Bíblia, memória, dados sensíveis, tarefas/datas/agendador, contas/conversões, parsing de APIs (amostra real da AwesomeAPI), fallbacks, rede lenta/fora/erro/JSON inválido, provedores de IA (simulados), segurança HTTP real (token, CSRF, path traversal), palmas (sinais sintéticos) |
+| E2E (`tests/e2e/run-e2e.js`) | Chromium real; **palmas por áudio real** (WAV no microfone falso) no fluxo e no botão “Testar palmas” (evento `PALMS_DETECTED`); teste de microfone com `getUserMedia`; teste de voz (reprodução + interrupção); botão PARAR FALA; estado no topo; cálculos de motor e engenharia; desabafo e revisão sem IA; tarefa em duas etapas; modo offline (inclusive cálculo de motor sem servidor); recarregar página; reinício do servidor; persistência; layout Pixel 7; PWA |
 | **Simulado** | reconhecimento de fala e síntese de voz no E2E (frases roteirizadas/fala interceptada); APIs de IA e fontes de dados nos testes unitários |
-| **Não testado** | aparelho Android físico, instalação real do PWA, microfone físico, vozes reais, notificação do sistema (o Chromium sem tela nega a permissão), IA com chave real, fontes externas reais (bloqueadas neste ambiente de desenvolvimento) |
+| **Não testado** | aparelho Android físico, instalação real do PWA, microfone físico, vozes reais, notificação do sistema (o Chromium sem tela nega a permissão), IA local real (Ollama não pôde ser baixado neste ambiente — a detecção e a conversa foram testadas com servidor simulado), IA do navegador (Chromium de teste não tem), fontes externas reais (bloqueadas neste ambiente de desenvolvimento) |
 
 ## 13. Estrutura
 ```
 server/
   index.js              HTTP + API + SSE + estáticos (+ /shared)
   brain/                brain.js (entrada), orchestrator.js (pipeline), commands.js (registro),
-                        tone.js (7 tons + emergência), personality.js, llm.js + ai/ (provedores)
+                        tone.js (7 tons + emergência), personality.js, local-mind.js (modo local inteligente),
+                        llm.js + ai/ (local.js = IA local gratuita; anthropic/openai opcionais)
   commands/             loader.js + custom/ (comandos personalizados)
   core/                 eventos, logs, store, settings, http/cache, health, selftest, secrets, when (datas)
   modules/              bible, news, memory, tasks, house, engineering, engine
-shared/                 math.js, units.js (usados pelo servidor e pelo navegador offline)
-public/js/              core/ (bus, api, estado, offline-brain), modules/ (ouvido, voz, palmas, device, wake/),
+shared/                 math.js, units.js, physics.js (usados pelo servidor e pelo navegador offline)
+public/js/              core/ (bus, api, estado, offline-brain), modules/ (ouvido, voz, palmas, device, browser-ai, wake/),
                         ui/ (núcleo, Bíblia, notícias, painéis, diagnóstico)
 config/                 personality.json (tons), news-sources.json
 ```
@@ -230,7 +259,10 @@ Ao mudar arquivos de `public/` em produção, aumente `VERSION` em `public/sw.js
 | "Reconhecimento precisa de internet" | Chrome processa a fala online | Conecte à internet ou digite |
 | Palmas não disparam | Detector desligado, app em 2º plano ou limiar alto | Ative em Configurações; mantenha o app aberto; ajuste sensibilidade/limiar olhando o medidor |
 | Palmas disparam sozinhas | Ambiente barulhento | Baixe a sensibilidade ou suba o limiar manual |
-| "IA não configurada" | `.env` sem `AI_PROVIDER`/`AI_API_KEY` | Configure (seção 3) e reinicie |
+| "IA INDISPONÍVEL" | Nenhuma IA local aberta | Instale e abra o Ollama (seção 3); o JARVIS detecta em até 30 s. Tudo o mais funciona no modo local |
+| IA local lenta | Modelo grande para o PC | Use um modelo menor (`ollama pull llama3.2:1b`) e defina `AI_MODEL` |
+| "NOTIFICAÇÕES BLOQUEADAS" | Permissão negada no navegador | Diagnóstico → **ATIVAR NOTIFICAÇÕES** e siga as instruções; depois “Verificar de novo” |
+| Topo mostra "LIMITADO" | Internet do servidor limitada | Veja Diagnóstico → INTERNET (pontos de teste e latência) |
 | "Não consegui confirmar a cotação/os preços atuais" | Fonte fora do ar ou bloqueando acesso | Normal; tente mais tarde (nada é inventado) |
 | Bíblia não carrega no 1º uso | Sem internet para baixar o texto | `npm run bible:download` com internet |
 | Pede token toda hora | `JARVIS_ACCESS_TOKEN` definido e token errado | Digite o token do `.env` |
@@ -238,12 +270,13 @@ Ao mudar arquivos de `public/` em produção, aumente `VERSION` em `public/sw.js
 | Memórias protegidas ilegíveis | `data/.secret.key` perdida ou trocada | Restaure a chave original do backup |
 
 ## 16. Estado atual
-v2.0.0 estável: **194/194** testes e **27/27** etapas E2E. Não testado em Android físico, com IA real nem com as
-fontes externas ao vivo. Detalhes em [`JARVIS_STATE.md`](JARVIS_STATE.md).
+v2.1.0: **221/221** testes e **34/34** etapas E2E. Estado detalhado e verdadeiro de cada módulo
+(FUNCIONANDO / LIMITADO / INDISPONÍVEL / PENDENTE, com o motivo) em [`JARVIS_STATUS.md`](JARVIS_STATUS.md).
 
 ## 17. Continuação do desenvolvimento
-Leia, nesta ordem: `CONTINUE_JARVIS.md` → `HANDOFF_JARVIS.md` → `JARVIS_STATE.md` → `PROJECT_INVENTORY.md` →
-`DECISIONS_JARVIS.md` → `TRANSFER_CHECKLIST.md`. Todo o trabalho está no branch `ccr-8d48bdce-skxdvi`.
+Leia, nesta ordem: `JARVIS_STATUS.md` → `CONTINUE_JARVIS.md` → `HANDOFF_JARVIS.md` → `PROJECT_INVENTORY.md` →
+`DECISIONS_JARVIS.md`. O trabalho da v2.1 está no branch `claude/desenvolvimento-anterior-mq06fb`
+(o da v2.0, no `ccr-8d48bdce-skxdvi`).
 
 ## 18. Limitações conhecidas
 - Reconhecimento de fala: Chrome/Edge/Android (online). Firefox não tem; Safari iOS é parcial. Use texto.
@@ -251,4 +284,6 @@ Leia, nesta ordem: `CONTINUE_JARVIS.md` → `HANDOFF_JARVIS.md` → `JARVIS_STAT
   interrupção por “pare” fica desligada se as palmas estiverem ativas (use duas palmas para interromper).
 - Palmas/lembretes com o app fechado ou a tela bloqueada não são garantidos (limite do navegador).
 - Média de combustíveis calculada pelo JARVIS pode diferir levemente da síntese oficial da ANP.
-- Casa: apenas Home Assistant.
+- Casa: apenas Home Assistant (gratuito).
+- IA local depende do computador: modelos pequenos (1–3 B) rodam em PC comum, mas respondem em segundos e erram mais que IAs grandes.
+- IA do navegador é experimental e só existe em versões recentes do Chrome para computador.

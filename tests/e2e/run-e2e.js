@@ -85,8 +85,8 @@ const INIT = () => {
   const synth = {
     speaking: false, pending: false, paused: false, onvoiceschanged: null,
     getVoices: () => [{ name: 'Teste pt-BR', lang: 'pt-BR', localService: true }],
-    speak(u) { if (u.text.trim()) window.__spoken.push(u.text); this.speaking = true; cur = u; u.__t = setTimeout(() => { this.speaking = false; cur = null; u.onend?.(); }, 250); },
-    cancel() { if (cur) { clearTimeout(cur.__t); window.__cancelled++; } this.speaking = false; cur = null; },
+    speak(u) { if (u.text.trim()) window.__spoken.push(u.text); this.speaking = true; cur = u; setTimeout(() => u.onstart?.(), 5); u.__t = setTimeout(() => { this.speaking = false; cur = null; u.onend?.(); }, 250); },
+    cancel() { if (cur) { clearTimeout(cur.__t); window.__cancelled++; const c = cur; setTimeout(() => c.onerror?.({ error: 'interrupted' }), 0); } this.speaking = false; cur = null; },
     pause() { this.paused = true; }, resume() { this.paused = false; },
   };
   Object.defineProperty(window, 'speechSynthesis', { value: synth });
@@ -119,7 +119,7 @@ const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined,
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}`, '--autoplay-policy=no-user-gesture-required'],
 });
-console.log('\nTESTE FINAL — JARVIS (Fase 2)\n');
+console.log('\nTESTE FINAL — JARVIS (v2.1)\n');
 try {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['microphone', 'notifications'] });
   await ctx.addInitScript(INIT);
@@ -134,10 +134,10 @@ try {
     await page.waitForSelector('#boot', { state: 'detached' });
     return log.replace(/\s+/g, ' ').slice(0, 90);
   });
-  await step('3. Diagnóstico com semáforo (12 componentes, motivo ao tocar)', async () => {
+  await step('3. Diagnóstico com semáforo (16 componentes, motivo ao tocar)', async () => {
     await page.keyboard.press('d');
     await page.waitForSelector('.diag-grid');
-    assert(await page.locator('.diag-item').count() === 12, 'faltam componentes');
+    assert(await page.locator('.diag-item').count() === 16, 'faltam componentes');
     await page.click('.diag-item[data-id="ia"]');
     assert(/Não configurada/.test(await page.textContent('#diag-reason')), 'motivo da IA');
     await page.screenshot({ path: path.join(SHOTS, '01-diagnostico.png') });
@@ -256,15 +256,20 @@ try {
   });
   await step('24. Modo offline: sem rede → banner, contas locais e última página da Bíblia', async () => {
     await ctx.setOffline(true);
+    try {
     await page.fill('#command-input', 'quanto é 7 vezes 8?'); await page.press('#command-input', 'Enter');
     await page.waitForFunction(() => /7 × 8 = 56/.test(document.getElementById('transcript').textContent), null, { timeout: 15000 });
     assert(/SERVIDOR INACESSÍVEL/.test(await page.textContent('#banner')), 'banner offline ausente');
+    await page.waitForFunction(() => document.getElementById('jarvis-status').textContent === 'OFFLINE', null, { timeout: 10000 }).catch(() => {});
+    assert((await page.textContent('#jarvis-status')) === 'OFFLINE', `estado no topo: ${await page.textContent('#jarvis-status')}`);
+    await page.fill('#command-input', 'quanto tempo para 150 km a 90 km/h'); await page.press('#command-input', 'Enter');
+    await page.waitForFunction(() => /1 h 40 min/.test(document.getElementById('transcript').textContent), null, { timeout: 15000 });
     await page.fill('#command-input', 'Bíblia'); await page.press('#command-input', 'Enter');
     await page.waitForSelector('#bible-page .verse');
     assert(/última página salva/.test(await page.textContent('#transcript')), 'sem página em cache');
     await page.screenshot({ path: path.join(SHOTS, '03-offline.png') });
     await closeSheets(page);
-    await ctx.setOffline(false);
+    } finally { await ctx.setOffline(false); }
     await page.fill('#command-input', 'que dia é hoje?'); await page.press('#command-input', 'Enter');
     await page.waitForFunction(() => document.getElementById('banner').hidden, null, { timeout: 15000 });
   });
@@ -279,6 +284,63 @@ try {
   await step('Ajuda e status por voz', async () => {
     await say(page, 'JARVIS, ajuda.'); assert(/Bíblia/.test(await lastJarvis(page)) && /Silêncio/.test(await lastJarvis(page)), 'ajuda');
     await say(page, 'JARVIS, status.'); assert(/Microfone:/.test(await lastJarvis(page)) && /IA: não configurada/.test(await lastJarvis(page)), 'status');
+  });
+  await step('28. Cálculo de MOTOR: 80 km/h durante 12 minutos', async () => {
+    await say(page, 'JARVIS, se eu andar a 80 km/h durante 12 minutos, quantos quilômetros percorro?');
+    const t = await lastJarvis(page); assert(/16 km/.test(t) && /d = v × t/.test(t), t); return t.slice(0, 70);
+  });
+  await step('29. Cálculo de ENGENHARIA: força, custo de viagem e rpm', async () => {
+    await say(page, 'qual a força para 10 kg a 9,8 m/s2'); assert(/98 N/.test(await lastJarvis(page)), await lastJarvis(page));
+    await say(page, 'quanto gasto em 300 km com 10 km/l e gasolina a 6,20'); assert(/R\$ 186,00/.test(await lastJarvis(page)), await lastJarvis(page));
+    await say(page, 'converta 100 km/h para m/s'); assert(/27,7778 m\/s/.test(await lastJarvis(page)), await lastJarvis(page));
+  });
+  await step('30. Conversa sem IA: desabafo acolhido, revisão e tarefa em duas etapas', async () => {
+    await say(page, 'estou mal hoje'); assert(/sinto muito/i.test(await lastJarvis(page)), await lastJarvis(page));
+    await say(page, 'faça uma revisão'); assert(/Revisão/.test(await lastJarvis(page)), await lastJarvis(page));
+    await page.fill('#command-input', 'crie uma tarefa'); await page.press('#command-input', 'Enter');
+    await page.waitForFunction(() => /Qual é a tarefa/.test(document.getElementById('transcript').textContent), null, { timeout: 15000 });
+    await page.fill('#command-input', 'trocar o óleo do carro'); await page.press('#command-input', 'Enter');
+    await page.waitForFunction(() => /Tarefa anotada: Trocar o óleo do carro/.test(document.getElementById('transcript').textContent), null, { timeout: 15000 });
+  });
+  await step('31. Estado no topo e camada INTERNET', async () => {
+    await page.waitForFunction(() => !['FALANDO', 'PROCESSANDO', 'OUVINDO'].includes(document.getElementById('jarvis-status').textContent), null, { timeout: 15000 });
+    const badge = await page.textContent('#jarvis-status');
+    assert(['ONLINE', 'LIMITADO', 'OFFLINE'].includes(badge), badge);
+    const net = await page.evaluate(() => fetch('/api/internet').then((r) => r.json()));
+    assert(['online', 'limited', 'offline'].includes(net.state), JSON.stringify(net));
+    return `topo: ${badge} · internet do servidor: ${net.state} (${net.probes.map((p) => `${p.id} ${p.ok ? 'ok' : 'falhou'}`).join(', ')})`;
+  });
+  await step('32. Diagnóstico: testar voz, testar palmas (áudio real) e notificações', async () => {
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('d');
+    await page.waitForSelector('#diag-voice');
+    await page.click('#diag-voice');
+    await page.waitForFunction(() => /^(🟢|🟡|🔴)/.test(document.getElementById('diag-test-out')?.textContent || ''), null, { timeout: 20000 });
+    const voice = await page.textContent('#diag-test-out');
+    assert(/interrupção OK/.test(voice), voice);
+    await page.click('#diag-clap');
+    await page.waitForFunction(() => /Palmas:/.test(document.getElementById('toast')?.textContent || ''), null, { timeout: 20000 });
+    const clap = await page.textContent('#diag-test-out');
+    assert(/PALMS_DETECTED/.test(clap), clap);
+    const help = await page.textContent('#notif-help');
+    assert(help.length > 30, 'sem instruções de notificação');
+    await closeSheets(page);
+    return `voz SIMULADA (síntese falsa do teste) · palmas: áudio real do microfone falso · notificações: ${(await page.evaluate(() => Notification.permission))}`;
+  });
+  await step('33. Botão PARAR FALA interrompe a resposta', async () => {
+    await page.evaluate(() => { window.__cancelled = 0; });
+    await page.fill('#command-input', 'ajuda'); await page.press('#command-input', 'Enter');
+    await page.waitForSelector('#stop-speech:not([hidden])', { timeout: 10000 });
+    await page.click('#stop-speech');
+    await page.waitForSelector('#stop-speech', { state: 'hidden', timeout: 5000 });
+    assert(await page.evaluate(() => window.__cancelled) > 0, 'fala não foi cancelada');
+  });
+  await step('34. Recarregar a página → progresso mantido', async () => {
+    await page.reload();
+    await page.waitForSelector('#boot-start:not([hidden])');
+    await page.click('#boot-start');
+    await page.waitForSelector('#boot', { state: 'detached' });
+    await say(page, 'onde parei?'); assert(/Gênesis 2, versículo \d+/.test(await lastJarvis(page)), await lastJarvis(page));
   });
   await step('Configuração persistente (tema âmbar)', async () => {
     await page.evaluate(() => fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ui: { theme: 'ambar' } }) }));

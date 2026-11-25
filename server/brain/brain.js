@@ -11,24 +11,18 @@ import { ENGINE_DISCLAIMER } from '../modules/engine/engine.js';
 import { detectTone, detectDomain, emergencyText } from './tone.js';
 import { getPersonality, systemPrompt } from './personality.js';
 import * as llm from './llm.js';
+import { localReply, getMode, clearMode } from './local-mind.js';
+import * as tasks from '../modules/tasks/tasks.js';
 import { normalizeInput, resolveIntent, dispatch, handlePending, moduleResult, speechFrom, speechLimit, getRecentCommands } from './orchestrator.js';
 
 export { getRecentCommands };
 
-const NO_AI = 'A IA conversacional externa não está configurada, então não consigo conversar livremente sobre isso. Comandos funcionam normalmente: diga "ajuda" para ver a lista.';
-
-function localFallback(text, tone) {
-  const t = normalize(text);
-  if (tone.mode === 'desabafo') {
-    return 'Poxa, sinto muito que você esteja passando por isso. Estou aqui. Se quiser, me conta mais — e, se for algo muito pesado, conversar com alguém de confiança ou ligar para o CVV no 188 (24 horas, gratuito) pode ajudar. Observação: minha IA conversacional não está configurada agora, então minhas respostas estão limitadas.';
-  }
-  if (/^(oi|ola|e ai|eai|bom dia|boa tarde|boa noite|fala|salve|opa)\b/.test(t)) {
-    const h = formatTimeSpoken().h;
-    return `${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}! Estou online no modo local. Posso abrir a Bíblia, trazer notícias, cuidar de tarefas, fazer contas e guardar memórias. Para conversar livremente, configure a IA no servidor.`;
-  }
-  if (/\b(obrigad\w|valeu|vlw)\b/.test(t)) return 'Por nada. Estou por aqui.';
-  if (/\b(quem e voce|seu nome|o que voce e)\b/.test(t)) return 'Sou o JARVIS, sua IA pessoal. No momento estou no modo local: comandos, Bíblia, memória, tarefas, contas e notícias funcionam; a conversa livre depende da IA configurada no servidor.';
-  return NO_AI;
+/** Resposta sem IA: modo local inteligente (nunca finge ser IA). */
+function localAnswer(text, ctx, tone, base, emergency, prefix = '') {
+  const lr = localReply(text, { sess: ctx.sess, tone });
+  const t = emergency || `${prefix}${lr.text}`;
+  return moduleResult({ ...base, module: emergency ? base.module : lr.module, mode: emergency ? 'URGENTE' : lr.mode, intent: emergency ? 'conversation.urgent' : lr.intent,
+    message: t, text: t, source: 'local', offline: true, success: !!emergency || !lr.unanswered, wantsAI: !emergency && !!lr.unanswered });
 }
 
 function history(sess) {
@@ -48,10 +42,8 @@ async function converse(text, ctx, tone) {
   const domain = detectDomain(text);
   const base = { module: domain === 'motor' ? 'MOTOR' : domain === 'engenharia' ? 'ENGENHARIA' : 'CÉREBRO', tone: tone.mode };
   const emergency = tone.mode === 'urgente' ? emergencyText(text) : '';
-  if (!llm.available()) {
-    const t = emergency || localFallback(text, tone);
-    return moduleResult({ ...base, intent: emergency ? 'conversation.urgent' : 'conversation.local', message: t, text: t, source: 'local', offline: true, success: !!emergency || t !== NO_AI });
-  }
+  await llm.refresh().catch(() => {});
+  if (!llm.available()) return localAnswer(text, ctx, tone, base, emergency);
   const p = getPersonality();
   const bibleCtx = sess.context.activeModule === 'bible' ? `O leitor da Bíblia está aberto. ${reading.whereAmI(ctx.pageSize)}` : '';
   const system = systemPrompt(p, {
@@ -71,11 +63,34 @@ async function converse(text, ctx, tone) {
     let out = answer || 'Hmm, fiquei sem resposta agora. Pode repetir?';
     if (emergency && !/19[0-3]/.test(out)) out = `${emergency}\n\n${out}`;
     if (domain === 'motor' && /\b(barulho|ruido|falha|nao liga|nao pega|esquentando|superaquec\w+|fumaca|vazamento|cheiro|luz da injecao|engasga|trepida|vibra)\b/.test(normalize(text)) && !/inspe(c|ç)/i.test(out)) out += `\n\n${ENGINE_DISCLAIMER}`;
-    return moduleResult({ ...base, intent: domain ? `conversation.${domain}` : 'conversation', message: out, text: out, source: `IA: ${llm.status().providerName} (${llm.model()})` });
+    return moduleResult({ ...base, intent: domain ? `conversation.${domain}` : 'conversation', message: out, text: out, source: `${llm.status().state}: ${llm.status().providerName} (${llm.model()})` });
   } catch (err) {
-    const t = `${emergency ? `${emergency}\n\n` : ''}Não consegui acessar a IA agora (${err.message}). ${emergency ? '' : localFallback(text, tone)}`.trim();
-    return moduleResult({ ...base, success: false, intent: 'conversation.error', message: t, text: t, source: 'local', error: true });
+    if (emergency) { const t = emergency; return moduleResult({ ...base, success: true, intent: 'conversation.urgent', message: t, text: t, source: 'local' }); }
+    const r = localAnswer(text, ctx, tone, base, '', `Não consegui acessar a IA agora (${err.message}). Respondendo no modo local: `);
+    return { ...r, intent: r.success ? r.intent : 'conversation.error', error: !r.success };
   }
+}
+
+/** "crie uma tarefa" → "qual?" → próxima frase vira a tarefa. */
+function createAwaitedTask(text, sess) {
+  sess.context.awaiting = null;
+  const clean = text.replace(/^\s*(ei |ok )?jarvis[,\s]*/i, '').replace(/[.!]+$/, '').trim();
+  if (memory.detectSensitive(clean)) return moduleResult({ intent: 'task.add', module: 'TAREFAS', text: 'Isso parece conter dados sensíveis. Por segurança, não vou salvar.', message: '' });
+  const task = tasks.add(clean.charAt(0).toUpperCase() + clean.slice(1));
+  sess.context.lastTaskId = task.id;
+  const t = `Tarefa anotada: ${task.text}. Se quiser um horário, diga "adia para amanhã às 9h".`;
+  return moduleResult({ intent: 'task.add', module: 'TAREFAS', text: t, message: t, data: { task } });
+}
+
+/** Modo da resposta (exibido na interface): CONVERSA, AJUDA, ESTUDO, TÉCNICO, DESABAFO, BRINCADEIRA, ORDEM, REVISÃO, CÁLCULO, BÍBLIA, URGENTE. */
+export function modeOf(result, tone) {
+  const i = String(result.intent || '');
+  if (/^bible\./.test(i)) return 'BÍBLIA';
+  if (/^(engineering|engine|physics|calc)\./.test(i)) return 'CÁLCULO';
+  if (/^routine\.review/.test(i)) return 'REVISÃO';
+  if (/^system\.help/.test(i)) return 'AJUDA';
+  if (!i.startsWith('conversation')) return 'ORDEM';
+  return { desabafo: 'DESABAFO', resenha: 'BRINCADEIRA', estudo: 'ESTUDO', tecnico: 'TÉCNICO', urgente: 'URGENTE', serio: 'CONVERSA', normal: 'CONVERSA' }[tone.mode] || 'CONVERSA';
 }
 
 /**
@@ -99,12 +114,16 @@ export async function processInput(raw, { sessionId = 'default', pageSize = 8, s
   let result = await handlePending(norm, ctx);
   if (!result) {
     const found = resolveIntent(norm, sess);
-    if (found) result = await dispatch(found, ctx);
+    if (found) { sess.context.awaiting = null; result = await dispatch(found, ctx); }
+    else if (sess.context.awaiting === 'task.text') result = createAwaitedTask(text, sess);
   }
   const tone = detectTone(text, { isCommand: !!result });
   if (!result) result = await converse(text, ctx, tone);
 
   result.tone = result.tone || tone.mode;
+  result.mode = result.mode || modeOf(result, tone);
+  if (!String(result.intent || '').startsWith('conversation') && getMode(sess) === 'desabafo') clearMode(sess);
+  if (result.success !== false && !String(result.intent || '').startsWith('conversation.explain')) sess.context.lastResult = { intent: result.intent, module: result.module, text: result.text, formula: result.formula || null };
   const s = getSettings(); // pode ter mudado (modo silencioso)
   if (result.speech === undefined) result.speech = result.text;
   result.speech = s.voice.enabled && !s.voice.silent ? speechFrom(result.speech, speechLimit(result, s)) : '';
@@ -113,6 +132,6 @@ export async function processInput(raw, { sessionId = 'default', pageSize = 8, s
   result.activeModule = sess.context.activeModule || null;
   result.ms = Date.now() - started;
   memory.pushHistory(sess, 'assistant', result.sensitive ? '[informação protegida exibida]' : result.text, { intent: result.intent });
-  log.info('cerebro', `Resposta: ${result.intent} (${result.ms}ms, tom ${result.tone})`);
+  log.info('cerebro', `Resposta: ${result.intent} · módulo ${result.module} · ${result.success === false ? 'falhou' : 'ok'} · ${result.ms}ms · fonte ${result.source || 'local'} · tom ${result.tone}`, { intent: result.intent, module: result.module, ok: result.success !== false, ms: result.ms, source: result.source || 'local' });
   return result;
 }

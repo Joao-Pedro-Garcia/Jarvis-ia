@@ -7,7 +7,11 @@ let lastSummary = {};
 
 function fxCard(ex) {
   if (!ex) return '';
-  if (!ex.ok) return `<section class="news-card"><h3>💰 CÂMBIO</h3><div class="err-box">${esc(ex.error || 'Não consegui confirmar a cotação atual neste momento.')}</div></section>`;
+  if (!ex.ok) {
+    const lk = ex.lastKnown;
+    const cache = lk?.rates?.length ? `<div class="cache-box"><b>CACHE — NÃO CONFIRMADO AGORA</b><div class="fx-row">${lk.rates.map((r) => `<div class="fx"><span class="fx-name">${r.flag} ${esc(r.name.toUpperCase())}</span><b class="fx-val stale">R$ ${brl(r.value)}</b></div>`).join('')}</div><p class="source-note">Última cotação obtida em ${fmtDateTime(lk.savedAt)} (${relTime(lk.savedAt)}) · ${esc(lk.rates[0].source)}. Pode não ser o valor atual.</p></div>` : '';
+    return `<section class="news-card"><h3>💰 CÂMBIO</h3><div class="err-box">${esc(ex.error || 'Não consegui confirmar a cotação atual neste momento.')}</div>${cache}</section>`;
+  }
   const cells = ex.rates.map((r) => {
     const changed = prevValues[r.code] !== undefined && prevValues[r.code] !== r.value;
     prevValues[r.code] = r.value;
@@ -21,7 +25,12 @@ function fxCard(ex) {
 
 function fuelCard(f) {
   if (!f) return '';
-  if (!f.ok) return `<section class="news-card"><h3>⛽ COMBUSTÍVEIS</h3><div class="err-box">${esc(f.error || 'Pesquisa da ANP indisponível agora.')}</div></section>`;
+  if (!f.ok) {
+    const lk = f.lastKnown;
+    const rowsLk = (arr) => (arr || []).map((p) => `<tr><td>${esc(p.product)}</td><td class="v stale">R$ ${brl(p.average)}/L</td></tr>`).join('');
+    const cache = lk ? `<div class="cache-box"><b>CACHE — NÃO CONFIRMADO AGORA</b><table class="fuel-table"><tr><th>TOCANTINS</th><th></th></tr>${rowsLk(lk.state?.prices)}<tr><th>BRASIL</th><th></th></tr>${rowsLk(lk.brazil?.prices)}</table><p class="source-note">Última pesquisa obtida: semana ${fmtDate(lk.period.from)} a ${fmtDate(lk.period.to)}, consultada em ${fmtDateTime(lk.savedAt)} · ${esc(lk.source)}. Pode não refletir os preços atuais.</p></div>` : '';
+    return `<section class="news-card"><h3>⛽ COMBUSTÍVEIS</h3><div class="err-box">Dados indisponíveis no momento. ${esc(f.error || 'Pesquisa da ANP indisponível agora.')}</div>${cache}</section>`;
+  }
   const rows = (arr) => arr.map((p) => `<tr><td>${esc(p.product)}</td><td class="v">R$ ${brl(p.average)}/L</td></tr>`).join('');
   return `<section class="news-card"><h3>⛽ COMBUSTÍVEIS</h3>
     <table class="fuel-table"><tr><th>TOCANTINS</th><th></th></tr>${rows(f.state.prices)}<tr><th>BRASIL</th><th></th></tr>${rows(f.brazil.prices)}</table>
@@ -40,7 +49,11 @@ function storyHtml(s, i) {
 
 function storiesCards(st, parts) {
   if (!st) return '';
-  if (st.error) return `<section class="news-card wide"><div class="err-box">${esc(st.error)}</div></section>`;
+  if (st.error) {
+    const c = st.cached;
+    const cache = c ? `<section class="news-card wide cache-box"><h3>🗂 ÚLTIMAS NOTÍCIAS SALVAS — CACHE</h3><p class="source-note">Obtidas em ${fmtDateTime(c.fetchedAt)} (${relTime(c.fetchedAt)}). Não foram confirmadas agora.</p>${[...c.brazil, ...c.world].map(storyHtml).join('')}</section>` : '';
+    return `<section class="news-card wide"><div class="err-box">${esc(st.error)}</div></section>${cache}`;
+  }
   let html = '';
   if (parts.includes('brazil')) html += `<section class="news-card"><h3>🇧🇷 BRASIL</h3>${st.brazil.length ? st.brazil.map(storyHtml).join('') : '<p class="muted">Sem notícias recentes disponíveis.</p>'}</section>`;
   if (parts.includes('world')) html += `<section class="news-card"><h3>🌎 MUNDO</h3>${st.world.length ? st.world.map(storyHtml).join('') : '<p class="muted">Sem notícias recentes disponíveis.</p>'}</section>`;

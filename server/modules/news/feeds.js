@@ -6,6 +6,11 @@ import { CONFIG_DIR } from '../../core/paths.js';
 import { fetchWithTimeout, cached } from '../../core/http-client.js';
 import { log } from '../../core/logger.js';
 import { setHealth } from '../../core/health.js';
+import { load, save } from '../../core/store.js';
+
+const CACHE_FILE = 'news-cache';
+/** Últimas matérias obtidas (para mostrar, ROTULADAS como cache, quando as fontes falham). */
+export const lastSaved = () => load(CACHE_FILE, { items: [], fetchedAt: null });
 
 const TTL = 10 * 60 * 1000; // 10 minutos
 export const MAX_AGE_HOURS = 36;
@@ -69,6 +74,8 @@ export async function fetchAll() {
     const cutoff = Date.now() - MAX_AGE_HOURS * 3600 * 1000;
     // Regra de atualidade: sem data ou antigas são descartadas.
     const fresh = items.filter((it) => it.publishedAt && Date.parse(it.publishedAt) >= cutoff && Date.parse(it.publishedAt) <= Date.now() + 3600e3);
-    return { items: fresh, failed, okSources: list.length - failed.length, totalSources: list.length, fetchedAt: new Date().toISOString() };
+    const fetchedAt = new Date().toISOString();
+    if (fresh.length) save(CACHE_FILE, { items: fresh.slice(0, 300), fetchedAt });
+    return { items: fresh, failed, okSources: list.length - failed.length, totalSources: list.length, fetchedAt, ...(fresh.length ? {} : { failed: failed.length ? failed : ['todas'], ok: false }) };
   });
 }

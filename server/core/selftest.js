@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './paths.js';
-import { isOnline } from './http-client.js';
+import { internetStatus, INTERNET_LABEL } from './http-client.js';
 import * as llm from '../brain/llm.js';
 import * as memory from '../modules/memory/memory.js';
 import * as tasks from '../modules/tasks/tasks.js';
@@ -17,20 +17,24 @@ const OK = 'ok', LIMITED = 'limited', FAIL = 'fail';
 async function timed(fn) { const t = Date.now(); try { const r = await fn(); return { ...r, ms: Date.now() - t }; } catch (err) { return { status: FAIL, detail: err.message, ms: Date.now() - t }; } }
 
 export async function runSelfTest({ includeAI = true } = {}) {
-  const online = await isOnline();
+  const net = await internetStatus({ force: true });
+  const online = net.online;
+  await llm.refresh({ force: true }).catch(() => {});
   const checks = {
     armazenamento: () => timed(async () => {
       const f = path.join(DATA_DIR, `.selftest-${process.pid}`);
       fs.writeFileSync(f, 'ok'); const ok = fs.readFileSync(f, 'utf8') === 'ok'; fs.rmSync(f);
       return { status: ok ? OK : FAIL, detail: ok ? `Leitura e escrita em ${DATA_DIR}` : 'Falha de leitura' };
     }),
-    internet: () => timed(async () => ({ status: online ? OK : FAIL, detail: online ? 'Conectado' : 'Sem internet — modo offline' })),
+    internet: () => timed(async () => ({ status: net.state === 'online' ? OK : net.state === 'limited' ? LIMITED : FAIL, detail: `${INTERNET_LABEL[net.state]} · ${net.probes.map((p) => `${p.id} ${p.ok ? `${p.ms} ms` : p.error}`).join(' · ')}` })),
     ia: () => timed(async () => {
       const st = llm.status();
-      if (!st.configured) return { status: LIMITED, detail: 'Não configurada — modo local (defina AI_PROVIDER/AI_API_KEY)' };
-      if (!includeAI) return { status: OK, detail: `${st.providerName} · ${st.model} (sem chamada de teste)` };
+      if (!st.configured) return { status: FAIL, detail: `IA INDISPONÍVEL — nenhuma IA local encontrada${st.localProbe?.reason ? ` (${st.localProbe.reason})` : ''}. Modo local inteligente ativo.` };
+      if (!includeAI) return { status: OK, detail: `${st.state} — ${st.providerName} · ${st.model} (sem chamada de teste)` };
+      // IA local: teste real e gratuito. IA online: só com ?ai=1 explícito (gasta tokens).
+      if (st.kind === 'online' && includeAI !== 'force') return { status: OK, detail: `${st.state} — ${st.providerName} · ${st.model} (configurada; teste real não executado para não gastar créditos)` };
       const p = await llm.ping();
-      return { status: p.ok ? OK : LIMITED, detail: `${st.providerName} · ${st.model} respondeu em ${p.ms} ms` };
+      return { status: p.ok ? OK : LIMITED, detail: `${st.state} — ${st.providerName} · ${st.model} respondeu em ${p.ms} ms` };
     }),
     memoria: () => timed(async () => { const m = memory.list(); return { status: OK, detail: `${m.facts.length} memórias, ${m.preferences.length} preferências` }; }),
     tarefas: () => timed(async () => ({ status: OK, detail: `${tasks.list().length} pendente(s); agendador de lembretes ativo` })),

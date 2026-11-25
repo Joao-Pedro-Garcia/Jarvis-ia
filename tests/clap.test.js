@@ -4,11 +4,15 @@ import { ClapDetector, analyzeBlock } from '../public/js/modules/clap-detector.j
 
 const FRAME = 256 / 48; // ms por quadro (256 amostras a 48 kHz)
 
+// Ruído pseudoaleatório com semente fixa: o teste é sempre igual (determinístico).
+let seed = 20261125;
+const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
 /** Gera uma linha do tempo de quadros a partir de eventos sonoros. */
 function timeline(totalMs, sounds, { noise = 0.003 } = {}) {
   const frames = [];
   for (let t = 0; t < totalMs; t += FRAME) {
-    let rms = noise * (0.8 + Math.random() * 0.4), peak = rms * 3, hf = 0.5;
+    let rms = noise * (0.8 + rand() * 0.4), peak = rms * 3, hf = 0.5;
     for (const s of sounds) {
       const dt = t - s.at;
       if (dt < 0 || dt > s.dur) continue;
@@ -95,7 +99,7 @@ test('ruído ambiente alto adapta o limiar (TV ligada)', () => {
 });
 
 test('analyzeBlock: ruído branco tem alta frequência alta; senoide grave, baixa', () => {
-  const white = Float32Array.from({ length: 256 }, () => Math.random() * 2 - 1);
+  const white = Float32Array.from({ length: 256 }, () => rand() * 2 - 1);
   const low = Float32Array.from({ length: 256 }, (_, i) => Math.sin((2 * Math.PI * 100 * i) / 48000));
   assert.ok(analyzeBlock(white).hf > 0.6);
   assert.ok(analyzeBlock(low).hf < 0.01);

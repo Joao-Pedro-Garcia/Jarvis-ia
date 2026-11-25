@@ -13,6 +13,8 @@ import * as house from '../modules/house/house.js';
 import { tryMath, formatNumber } from '../modules/engineering/math.js';
 import { tryConvert } from '../modules/engineering/units.js';
 import { tryEngineCalc } from '../modules/engine/engine.js';
+import { solvePhysics } from '../../shared/physics.js';
+import { setMode } from './local-mind.js';
 import { formatTimeSpoken, formatDateLong } from '../core/time.js';
 import { parseOrdinal, normalize, recoverOriginal } from '../core/text.js';
 import { getSettings, updateSettings } from '../core/settings.js';
@@ -47,7 +49,9 @@ export function detect(t, sess) {
   return null;
 }
 
-const bibleActive = (s) => s.context.activeModule === 'bible';
+const bibleActive = (s) => s.context.activeModule === 'bible'
+  // Bíblia usada por último (e não fechada): "avance"/"volte" continuam valendo.
+  || (!s.context.activeModule && s.context.lastResult?.module === 'BÍBLIA' && s.context.lastResult.intent !== 'bible.close');
 const newsActive = (s) => !!news.getLastSummary() && s.context.activeModule === 'news';
 const bibleUi = (view) => ({ panel: 'bible', bible: view });
 const say = (text, extra = {}) => ({ text, ...extra });
@@ -122,7 +126,7 @@ registerCommand({
     const lines = [
       `Sistema: online${s.security.safeMode ? ' (modo seguro)' : ''}${s.voice.silent ? ', modo silencioso' : ''}.`,
       `Internet: ${online ? 'conectada' : 'indisponível — modo offline'}.`,
-      `IA: ${ai.configured ? `${ai.providerName}, modelo ${ai.model}${ai.lastError ? ` (último erro: ${ai.lastError.message})` : ''}` : 'não configurada — modo local'}.`,
+      `IA: ${ai.configured ? `${ai.state} — ${ai.providerName}, modelo ${ai.model}${ai.lastError ? ` (último erro: ${ai.lastError.message})` : ''}` : 'não configurada — modo local inteligente (IA INDISPONÍVEL)'}.`,
       `Microfone: ${mic}. Reconhecimento de fala: ${c.hearing === false ? 'indisponível neste navegador' : 'disponível'}.`,
       `Voz: ${c.voice === false ? 'indisponível' : s.voice.silent ? 'silenciada' : 'ativa'}.`,
       `Memória: ${memory.list('facts').length} memórias, ${memory.list('preferences').length} preferências.`,
@@ -322,6 +326,8 @@ registerCommand({
     /^(a |minha )?biblia( sagrada)?$/,
     /\b(ler|leitura|abr\w+|continu\w+|retom\w+|bora|vamos)\b.{0,20}\bbiblia\b/, /\bbiblia\b.{0,15}\b(continu\w+|leitura|ler)\b/,
     /\b(continu\w+|retom\w+|segu\w+) (com )?(a |minha )?leitura\b/, /\bcontinu\w+ de onde (eu )?parei\b/, /\bleitura (de hoje|do dia|diaria)\b/,
+    // "continue" sozinho, sem outro contexto aberto: retoma a leitura de onde parou.
+    (t, s) => (/^(continue|continua|continuar|retome|retoma|retomar)$/.test(t) && !bibleActive(s) && s.context.activeModule !== 'news' ? [t] : null),
   ],
   action: async (_, ctx) => {
     const v = await reading.openDaily(ctx.pageSize);
@@ -429,7 +435,7 @@ registerCommand({
 registerCommand({
   name: 'news.summary', module: 'NOTÍCIAS', priority: 61, description: 'Resumo completo: câmbio, combustíveis, Brasil, mundo e curiosidade',
   aliases: ['Notícias', 'Notícias de hoje', 'Me atualiza', 'O que aconteceu hoje?', 'Me atualiza rapidamente'],
-  patterns: [/^(as )?noticias?( de hoje| do dia| agora)?$/, /\bme atualiz\w*\b/, /\bo que aconteceu hoje\b/, /\b(resumo|principais|ultimas) (das |de )?noticias\b/, /\bquais (sao )?as noticias\b/, /\bnovidades de hoje\b/, /\bnoticias de hoje\b/],
+  patterns: [/^(as )?noticias?( de hoje| do dia| agora)?$/, /\bme atualiz\w*\b/, /\b(mostr\w+|abr\w+|quero (ver |saber )?|traz\w*|ver|ler|tem) (as |umas |algumas )?(ultimas )?noticias\b/, /\bo que aconteceu hoje\b/, /\b(resumo|principais|ultimas) (das |de )?noticias\b/, /\bquais (sao )?as noticias\b/, /\bnovidades de hoje\b/, /\bnoticias de hoje\b/],
   action: async (_, ctx) => {
     const summary = await news.getSummary();
     ctx.sess.context.activeModule = 'news';
@@ -515,7 +521,7 @@ registerCommand({
 registerCommand({
   name: 'task.done', module: 'TAREFAS', priority: 62, mutates: true, description: 'Conclui tarefa ("concluí essa")',
   aliases: ['Concluí essa', 'Conclui a tarefa 1', 'Já fiz'],
-  patterns: [/^(conclui|concluido|feito|ja fiz|fiz|terminei|pronto|done)( essa| esta| isso| ela| a tarefa| o lembrete)?$/, /\b(conclu\w+|termin\w+|marc\w+ como feita|finaliz\w+|risca\w*) (a |essa |esta |o )?(tarefa|lembrete)\s*(\w+)?/],
+  patterns: [/^(conclui|concluido|feito|ja fiz|fiz|terminei|pronto|done)( essa| esta| isso| ela| a tarefa| o lembrete)?$/, /^(marqu?\w* (isso |essa |a tarefa |o lembrete )?como (concluid[oa]|feit[oa]|pronto|pronta|terminad[oa]))$/, /\b(conclu\w+|termin\w+|marc\w+ como feita|finaliz\w+|risca\w*) (a |essa |esta |o )?(tarefa|lembrete)\s*(\w+)?/],
   params: (t, m, s) => ({ task: resolveTask(t, s) }),
   action: async ({ task }) => {
     if (!task) return say('Qual tarefa? Diga "concluí a tarefa 1" ou peça "minhas tarefas" para ver a lista.');
@@ -663,7 +669,7 @@ registerCommand({
 
 // ======================= ENGENHARIA / MOTOR (cálculo local) =======================
 registerCommand({
-  name: 'engine.calc', module: 'MOTOR', priority: 53, description: 'Cálculos automotivos (potência, torque, cilindrada, consumo)',
+  name: 'engine.calc', module: 'MOTOR', priority: 66, description: 'Cálculos automotivos (potência, torque, cilindrada, consumo)',
   aliases: ['Qual a potência com 300 Nm a 4000 rpm?', 'Rodei 420 km com 35 litros, qual o consumo?'],
   patterns: [(t) => { const r = tryEngineCalc(t); return r ? [r] : null; }],
   params: (t, m) => m[0],
@@ -696,6 +702,55 @@ registerCommand({
   patterns: [(t) => { const r = tryMath(t); return r ? [r] : null; }],
   params: (t, m) => m[0],
   action: async (r) => say(`${r.expression.replace(/\*/g, '×').replace(/sqrt/g, '√')} = ${formatNumber(r.value)}`, { speech: `O resultado é ${formatNumber(r.value)}.` }),
+});
+
+
+// ======================= CÁLCULOS: FÍSICA, MOTOR E VIAGEM =======================
+registerCommand({
+  name: 'physics.solve', module: 'ENGENHARIA', priority: 65, description: 'Problemas de física, viagem e motor (distância, tempo, velocidade, força, pressão, energia, consumo, custo, relação de marcha)',
+  aliases: ['Se eu andar a 80 km/h durante 12 minutos, quantos quilômetros percorro?', 'Quanto gasto em 300 km com 10 km/l e gasolina a 6,20?', 'Qual a força para 10 kg a 9,8 m/s²?'],
+  patterns: [(t) => { const r = solvePhysics(t); return r ? [r] : null; }],
+  params: (t, m) => m[0],
+  action: async (r) => (r.ask ? say(r.ask, { module: r.module }) : say(`${r.text} Fórmula: ${r.formula}.`, { speech: r.text.replace(/≈/g, 'aproximadamente '), formula: r.formula, module: r.module })),
+});
+
+registerCommand({
+  name: 'calc.start', module: 'ENGENHARIA', priority: 49, description: 'Entra no modo cálculo',
+  aliases: ['Me ajude a calcular', 'Faça uma conta'],
+  patterns: [/^(me ajud\w+ a calcular|me ajuda (com uma conta|com umas contas|a fazer uma conta)|(faca|faz|fazer) (uma|umas) contas?|quero fazer uma conta|preciso (fazer uma conta|calcular( algo| uma coisa)?)|calculadora|modo calculo|abre a calculadora)$/],
+  action: async (_, ctx) => { setMode(ctx.sess, 'calc'); return say('Claro. Diga a conta ou o problema. Exemplos: "15% de 230", "raiz quadrada de 144", "converta 100 km/h para m/s", "quanto tempo para 150 km a 90 km/h" ou "potência com 300 Nm a 4000 rpm".'); },
+});
+
+// ======================= TAREFAS: pedido sem texto =======================
+registerCommand({
+  name: 'task.ask', module: 'TAREFAS', priority: 61, description: 'Pergunta qual tarefa criar',
+  aliases: ['Crie uma tarefa'],
+  patterns: [/^(cri\w+|adicion\w+|anot\w+|nova|fazer|faz) (uma |a )?(nova )?tarefa$/],
+  action: async (_, ctx) => { ctx.sess.context.awaiting = 'task.text'; return say('Claro. Qual é a tarefa?'); },
+});
+
+// ======================= REVISÃO =======================
+registerCommand({
+  name: 'routine.review', module: 'ROTINA', priority: 79, description: 'Revisão: tarefas, leitura, memórias e sistema',
+  aliases: ['Faça uma revisão', 'Revisão do dia'],
+  patterns: [/^(faca|faz|fazer|me (de|da)) (uma )?revisao( do dia| geral| de hoje)?$/, /^revis(ao|e|a)( do (meu )?dia| geral| de hoje| meu dia)?$/, /\b(revis\w+ (o |do )?meu dia|resumo geral)\b/],
+  action: async (_, ctx) => {
+    const t = tasks.today();
+    const all = tasks.list();
+    const done = tasks.list({ includeDone: true }).filter((x) => x.done && x.updatedAt && x.updatedAt.slice(0, 10) === new Date().toISOString().slice(0, 10));
+    const bible = await reading.current(ctx.pageSize).catch(() => null);
+    const mems = memory.list('facts').length + memory.list('preferences').length;
+    const lines = ['Revisão:'];
+    lines.push(`✅ Tarefas: ${all.length} pendente(s)${t.overdue.length ? `, ${t.overdue.length} atrasada(s)` : ''}${t.today.length ? `, ${t.today.length} para hoje` : ''}${done.length ? ` · ${done.length} concluída(s) hoje` : ''}.`);
+    if (t.overdue.length) lines.push(`⚠ Atrasadas: ${t.overdue.map((x) => tasks.describe(x)).join('; ')}`);
+    if (bible?.plan) lines.push(`📖 Bíblia: ${bible.plan.label} — ${bible.plan.done}/${bible.plan.total} capítulos${bible.plan.completedAt ? ' (concluída)' : ''}; você está em ${bible.ref.label}, página ${bible.pageIndex + 1}. Sequência: ${bible.streak} dia(s).`);
+    else if (bible) lines.push(`📖 Bíblia: próxima leitura começa em ${bible.position.label}.`);
+    lines.push(`🧠 Memória: ${mems} item(ns) guardado(s).`);
+    const ai = llm.status();
+    lines.push(`🖥 Sistema: ${ai.state}${ai.configured ? ` (${ai.providerName})` : ' — modo local inteligente ativo'}.`);
+    const speech = `Revisão. ${all.length ? `Você tem ${all.length} tarefa${all.length > 1 ? 's' : ''} pendente${all.length > 1 ? 's' : ''}${t.overdue.length ? `, ${t.overdue.length} atrasada${t.overdue.length > 1 ? 's' : ''}` : ''}.` : 'Nenhuma tarefa pendente.'} ${bible?.plan ? (bible.plan.completedAt ? 'A leitura bíblica de hoje está concluída.' : `Leitura bíblica: ${bible.plan.label}, ${bible.plan.done} de ${bible.plan.total} capítulos.`) : ''}`;
+    return say(lines.join('\n'), { speech: speech.trim(), data: { tasks: t, bible: bible?.plan || null } });
+  },
 });
 
 export const YES = /^(sim|pode|pode sim|confirmo|confirma|confirmar|claro|isso|tenho|tenho certeza|com certeza|ok|positivo|manda|manda ver|faz isso|pode fazer|afirmativo|s)$/;

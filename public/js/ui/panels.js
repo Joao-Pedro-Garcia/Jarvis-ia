@@ -44,7 +44,7 @@ export async function showMemory(sessionHistory = []) {
       <p class="hint">O JARVIS só guarda de forma permanente o que você autorizar (“lembre que…”). Senhas, cartões e documentos ficam <b>criptografados</b> e só aparecem após confirmação — nunca em voz alta.</p>
       ${section('tasks', 'TAREFAS E LEMBRETES')}<br>
       <div class="form-grid">${section('facts', 'MEMÓRIAS')}${section('preferences', 'PREFERÊNCIAS')}</div><br>
-      <fieldset class="fieldset"><legend>PROGRESSO DA BÍBLIA</legend><p class="hint" style="margin:0">Próxima leitura começa em <b>${esc(bible?.position ? `${bible.position.book.toUpperCase()} ${bible.position.chapter}` : '—')}</b> · ${bible?.chaptersPerDay ?? 3} capítulos por dia. Detalhes no leitor (diga “Bíblia”) e ajustes em Configurações.</p></fieldset><br>
+      <fieldset class="fieldset"><legend>PROGRESSO DA BÍBLIA</legend><p class="hint" style="margin:0">Próxima leitura começa em <b>${esc(bible?.position ? (bible.position.label || `${bible.position.book.toUpperCase()} ${bible.position.chapter}`) : '—')}</b> · ${bible?.chaptersPerDay ?? 3} capítulos por dia. Detalhes no leitor (diga “Bíblia”) e ajustes em Configurações.</p></fieldset><br>
       <fieldset class="fieldset"><legend>SESSÃO (conversa atual — não é salva em disco)</legend>
         <ul class="mem-list">${sessionHistory.slice(-10).map((h) => `<li><span class="t"><b>${h.role === 'user' ? 'Você' : 'JARVIS'}:</b> ${esc(h.text.slice(0, 160))}</span></li>`).join('') || '<li class="muted">Vazia.</li>'}</ul>
       </fieldset><br>
@@ -118,8 +118,9 @@ export async function showSettings({ onChange } = {}) {
         <label class="switch">Ativar com duas palmas <input type="checkbox" data-k="clap.enabled" ${s.clap.enabled ? 'checked' : ''}></label>
         <div class="field"><label>Sensibilidade: <span data-out="clap.sensitivity">${s.clap.sensitivity}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.clap.sensitivity}" data-k="clap.sensitivity" data-num></div>
         <div class="field"><label>Intervalo mínimo entre palmas (ms): <span data-out="clap.minGapMs">${s.clap.minGapMs}</span></label><input type="range" min="60" max="400" step="10" value="${s.clap.minGapMs}" data-k="clap.minGapMs" data-num></div>
-        <div class="field"><label>Limiar manual (0 = automático): <span data-out="clap.thresholdOverride">${s.clap.thresholdOverride}</span></label><input type="range" min="0" max="0.6" step="0.01" value="${s.clap.thresholdOverride}" data-k="clap.thresholdOverride" data-num></div>
+        <div class="field"><label>Volume mínimo da palma (limiar manual, 0 = automático): <span data-out="clap.thresholdOverride">${s.clap.thresholdOverride}</span></label><input type="range" min="0" max="0.6" step="0.01" value="${s.clap.thresholdOverride}" data-k="clap.thresholdOverride" data-num></div>
         <div class="field"><label>Intervalo máximo entre palmas (ms): <span data-out="clap.maxGapMs">${s.clap.maxGapMs}</span></label><input type="range" min="300" max="1500" step="50" value="${s.clap.maxGapMs}" data-k="clap.maxGapMs" data-num></div>
+        <div class="field"><label>Duração máxima de uma palma (ms): <span data-out="clap.maxClapMs">${s.clap.maxClapMs}</span></label><input type="range" min="40" max="250" step="10" value="${s.clap.maxClapMs}" data-k="clap.maxClapMs" data-num></div>
         <div class="field"><label>Tempo de espera após ativar (ms): <span data-out="clap.cooldownMs">${s.clap.cooldownMs}</span></label><input type="range" min="1000" max="8000" step="250" value="${s.clap.cooldownMs}" data-k="clap.cooldownMs" data-num></div>
         <p class="hint">Calibre com o medidor “Nível do microfone” (painel Sistema): a linha laranja é o limiar atual. <b>Limitação:</b> para detecção contínua de palmas com a tela bloqueada, o navegador pode interromper o microfone em segundo plano — deixe o JARVIS aberto (use “Manter tela ligada”).</p>
       </fieldset>
@@ -203,7 +204,7 @@ export async function showModules() {
     for (const c of cmds.commands) (byModule[c.module] ||= []).push(c);
     body.innerHTML = `<div class="form-grid">${status.modules.map((m) => `
       <fieldset class="fieldset"><legend>${esc(m.name)}</legend>
-        <p class="hint" style="margin-top:0">Status: <b>${esc(m.status)}</b> · ${esc(m.info)}</p>
+        <p class="hint" style="margin-top:0">Status: <b>${esc(m.label || m.status)}</b> · ${esc(m.info)}</p>
         <p class="hint">Última ação: ${m.last ? `${esc(m.last.event)} ${m.last.detail ? `(${esc(m.last.detail)})` : ''} · ${fmtDateTime(m.last.at)}` : '—'}</p>
         ${(byModule[m.name] || []).map((c) => `<div class="hint">• <b>${esc(c.description)}</b>${c.permission !== 'safe' ? ` <span class="badge warn">${c.permission === 'confirm' ? 'CONFIRMAÇÃO' : 'RESTRITO'}</span>` : ''}<br><span class="muted">${c.aliases.map((a) => `“${esc(a)}”`).join(', ')}</span></div>`).join('')}
       </fieldset>`).join('')}</div>`;

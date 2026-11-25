@@ -16,7 +16,7 @@ export class AndroidNativeWakeDetector extends WakeDetector {
   isSupported() { return typeof window.JarvisNative?.startWakeDetection === 'function'; }
   limitations() { return this.isSupported() ? ['Detecção mantida pelo serviço nativo do Android (notificação permanente).'] : ['Requer o app Android nativo do JARVIS, que ainda não existe.']; }
   async start(settings) {
-    window.__jarvisNativeWake = (kind, text) => (kind === 'double-clap' ? bus.emit(EVENTS.DOUBLE_CLAP, { native: true }) : bus.emit(EVENTS.VOICE_RECEIVED, { text: text || '', wake: true }));
+    window.__jarvisNativeWake = (kind, text) => (kind === 'double-clap' ? (bus.emit(EVENTS.PALMS_DETECTED, { native: true }), bus.emit(EVENTS.DOUBLE_CLAP, { native: true })) : bus.emit(EVENTS.VOICE_RECEIVED, { text: text || '', wake: true }));
     window.JarvisNative.startWakeDetection(JSON.stringify({ clap: settings.clap, wakeWord: settings.hearing.wakeWord }));
   }
   async stop() { window.JarvisNative?.stopWakeDetection?.(); }

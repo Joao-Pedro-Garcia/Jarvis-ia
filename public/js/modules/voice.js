@@ -7,6 +7,8 @@ export const voiceSupported = !!synth;
 let voices = [];
 let speakingToken = 0;
 let opts = { rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '' };
+let lastPlayback = null; // última vez que o navegador CONFIRMOU o início de uma fala (evento onstart)
+export const lastPlaybackAt = () => lastPlayback;
 
 function loadVoices() { voices = synth ? synth.getVoices() : []; }
 if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
@@ -59,6 +61,7 @@ export function speak(text) {
       u.lang = voice?.lang || opts.lang; if (voice) u.voice = voice;
       u.rate = opts.rate; u.pitch = opts.pitch; u.volume = opts.volume;
       u.onboundary = () => bus.emit(EVENTS.SPEECH_BOUNDARY);
+      u.onstart = () => { lastPlayback = new Date().toISOString(); };
       // Segurança: alguns navegadores não disparam onend (sem vozes instaladas, etc.).
       let ended = false;
       let guard;
@@ -100,4 +103,59 @@ export function resumeSpeaking() {
 export function unlockVoice() {
   if (!synth) return;
   const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u);
+}
+
+/** Espera a lista de vozes (no Chrome ela chega de forma assíncrona). */
+export function waitVoices(ms = 1500) {
+  if (!synth) return Promise.resolve([]);
+  loadVoices();
+  if (voices.length) return Promise.resolve(voices);
+  return new Promise((resolve) => {
+    const done = () => { loadVoices(); resolve(voices); };
+    const t = setTimeout(done, ms);
+    synth.addEventListener?.('voiceschanged', () => { clearTimeout(t); done(); }, { once: true });
+  });
+}
+
+export const voiceInfo = () => { const v = pickVoice(); return v ? { name: v.name, lang: v.lang, local: v.localService } : null; };
+
+/**
+ * TESTE REAL da síntese de voz: suporte, vozes instaladas, idioma, volume,
+ * reprodução (eventos start/end do navegador) e interrupção (cancel).
+ * Devolve { status: ok|limited|fail, detail, checks }.
+ */
+export async function testVoice({ text = 'Teste de voz do JARVIS.', interrupt = true } = {}) {
+  const checks = { supported: !!synth, voices: 0, ptVoices: 0, voice: null, volume: opts.volume, played: false, ended: false, interrupted: null, error: null };
+  if (!synth) return { status: 'fail', detail: 'SpeechSynthesis não existe neste navegador: as respostas aparecem só em texto.', checks };
+  await waitVoices();
+  checks.voices = voices.length;
+  checks.ptVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('pt')).length;
+  const v = pickVoice();
+  checks.voice = v ? `${v.name} (${v.lang}${v.localService ? ', local' : ', online'})` : null;
+  stopSpeaking();
+  const run = (txt, cancelAfterStart) => new Promise((resolve) => {
+    const u = new SpeechSynthesisUtterance(txt);
+    u.lang = v?.lang || opts.lang; if (v) u.voice = v;
+    u.rate = opts.rate; u.volume = opts.volume; u.pitch = opts.pitch;
+    const r = { started: false, ended: false, error: null };
+    const timer = setTimeout(() => resolve(r), 6000);
+    u.onstart = () => { r.started = true; lastPlayback = new Date().toISOString(); if (cancelAfterStart) setTimeout(() => synth.cancel(), 150); };
+    u.onend = () => { r.ended = true; clearTimeout(timer); resolve(r); };
+    u.onerror = (e) => { r.error = e.error; clearTimeout(timer); resolve(r); };
+    synth.speak(u);
+  });
+  const play = await run(text, false);
+  checks.played = play.started; checks.ended = play.ended; checks.error = play.error;
+  if (interrupt && play.started) {
+    const cut = await run('Este é um teste de interrupção. Esta frase deveria ser cortada antes do fim, porque o JARVIS precisa parar de falar na hora.', true);
+    checks.interrupted = cut.started && (cut.error === 'interrupted' || cut.error === 'canceled' || cut.ended) && !synth.speaking;
+  }
+  clientLog('voz', `Teste de voz: vozes ${checks.voices} (pt ${checks.ptVoices}), reproduziu ${checks.played}, interrupção ${checks.interrupted}`);
+  if (!checks.voices) return { status: 'fail', detail: 'Nenhuma voz instalada neste aparelho/navegador: a síntese não consegue falar. Instale um pacote de voz (Android: Configurações → Idioma → Saída de texto para fala).', checks };
+  if (!play.started) return { status: 'fail', detail: `O navegador não iniciou a fala${play.error ? ` (erro: ${play.error})` : ' (sem resposta em 6 s)'}. Toque na tela primeiro — alguns navegadores exigem um gesto para liberar o áudio.`, checks };
+  const parts = [`Reproduziu com a voz ${checks.voice}`, `${checks.ptVoices} voz(es) em português de ${checks.voices}`, `volume ${Math.round(opts.volume * 100)}%`, checks.interrupted == null ? 'interrupção não testada' : checks.interrupted ? 'interrupção OK' : 'interrupção FALHOU'];
+  if (opts.volume === 0) return { status: 'limited', detail: `${parts.join(' · ')}. O volume está em 0% nas configurações.`, checks };
+  if (!checks.ptVoices) return { status: 'limited', detail: `${parts.join(' · ')}. Nenhuma voz em português instalada: o JARVIS fala com sotaque de outro idioma. Instale uma voz pt-BR no sistema.`, checks };
+  if (checks.interrupted === false) return { status: 'limited', detail: `${parts.join(' · ')}.`, checks };
+  return { status: 'ok', detail: `${parts.join(' · ')}.`, checks };
 }

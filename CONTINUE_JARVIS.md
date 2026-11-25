@@ -1,3 +1,5 @@
+> **Atualização (v2.1.0):** o estado atual está em [`JARVIS_STATUS.md`](JARVIS_STATUS.md) (221 testes, 34 etapas E2E, IA local gratuita, modo local inteligente). Este arquivo descreve a v2.0 e fica como histórico. Branch da v2.1: `claude/desenvolvimento-anterior-mq06fb`.
+
 # CONTINUE_JARVIS — leia isto primeiro
 
 > **Você está assumindo o desenvolvimento de um projeto JARVIS existente. NÃO comece do zero.

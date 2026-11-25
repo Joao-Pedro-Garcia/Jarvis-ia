@@ -224,6 +224,9 @@ body[data-theme] .page p.verse { color: var(--text); }
 .badge.warn { border-color: rgba(var(--warn-rgb), .6); color: var(--warn); }
 .source-note { font: 10px var(--mono); color: var(--muted); margin-top: 8px; line-height: 1.5; }
 .err-box { border: 1px solid rgba(255,77,109,.4); background: rgba(255,77,109,.08); color: #ffd0d8; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.cache-box { border: 1px dashed rgba(255,193,77,.55); background: rgba(255,193,77,.06); padding: 10px 12px; border-radius: 10px; margin-top: 8px; font-size: 13px; }
+.cache-box > b { color: #ffc14d; letter-spacing: .12em; font-size: 11px; }
+.stale { opacity: .7; text-decoration: underline dotted rgba(255,193,77,.7); }
 
 /* ---------- formulários / listas genéricas ---------- */
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -265,6 +268,8 @@ body[data-theme] .page p.verse { color: var(--text); }
 .diag-item small { font: 9px var(--mono); color: var(--muted); letter-spacing: .08em; }
 .diag-item.fail { border-color: rgba(255,77,109,.45); }
 .diag-item.limited { border-color: rgba(var(--warn-rgb), .45); }
+.diag-item.error { border-color: rgba(255,77,109,.8); background: rgba(255,77,109,.08); }
+.diag-item small { text-align: center; }
 .diag-reason { margin: 10px 0 14px; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--line-strong); font-size: 13px; min-height: 40px; }
 .diag-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .h4 { font: 600 11px var(--mono); letter-spacing: .2em; color: var(--accent); margin: 0; }
@@ -349,3 +354,17 @@ body.no-anim *, body.no-anim *::before { animation: none !important; transition:
   .menu-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .diag-table td:nth-child(2) { white-space: nowrap; }
+
+/* ---------- estado no topo (ONLINE · OUVINDO · PROCESSANDO · FALANDO · OFFLINE · LIMITADO) ---------- */
+.sys-badge { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font: 600 10px var(--mono); letter-spacing: .14em; color: var(--muted); }
+.sys-badge.ok { color: var(--ok); border-color: rgba(61,255,168,.45); }
+.sys-badge.active { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 10px rgba(var(--accent-rgb), .45); animation: badge-pulse 1.2s ease-in-out infinite; }
+.sys-badge.warn { color: var(--warn); border-color: rgba(var(--warn-rgb), .55); }
+.sys-badge.bad { color: #ff4d6d; border-color: rgba(255,77,109,.55); }
+@keyframes badge-pulse { 50% { opacity: .55; } }
+body.no-anim .sys-badge.active { animation: none; }
+
+/* ---------- botão PARAR FALA (grande, fácil de tocar no celular) ---------- */
+.stop-speech { align-self: center; margin: 6px auto; min-height: 44px; padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(255,77,109,.6); background: rgba(255,77,109,.12); color: #ffd0d8; font: 600 13px var(--mono); letter-spacing: .14em; cursor: pointer; }
+.stop-speech:hover, .stop-speech:focus-visible { background: rgba(255,77,109,.25); outline: 2px solid rgba(255,77,109,.7); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .sys-badge.active { animation: none; } }

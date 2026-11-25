@@ -32,6 +32,7 @@ const db = () => load(STORE, DEFAULT);
 const commit = (d, action, item) => {
   save(STORE, d);
   bus.emitEvent(EVENTS.MEMORY_UPDATED, { action, kind: item?.kind, id: item?.id });
+  if (item?.kind === 'tasks') bus.emitEvent(EVENTS.TASK_UPDATED, { action, id: item.id });
   log.info('memoria', `Memória ${action}: ${item?.kind ?? ''}`);
 };
 

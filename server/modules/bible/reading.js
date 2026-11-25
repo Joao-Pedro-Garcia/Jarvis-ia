@@ -258,7 +258,7 @@ export function whereAmI(pageSize = 8) {
   return `Você ainda não começou. A primeira leitura será ${rangeLabel(buildPlan(s.position, s.chaptersPerDay, localDate()).chapters)}.`;
 }
 
-export function getSettings() { const s = state(); return { chaptersPerDay: s.chaptersPerDay, position: s.position }; }
+export function getSettings() { const s = state(); return { chaptersPerDay: s.chaptersPerDay, position: { ...s.position, label: refLabel(s.position) } }; }
 
 export function updateSettings({ chaptersPerDay, position }) {
   const s = state();
