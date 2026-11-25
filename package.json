@@ -11,7 +11,8 @@
     "bible:download": "node scripts/download-bible.js",
     "e2e": "node tests/e2e/run-e2e.js",
     "icons": "node scripts/make-icons.cjs",
-    "test:all": "npm test && npm run e2e"
+    "test:all": "npm test && npm run e2e",
+    "backup": "node scripts/backup-data.js"
   },
   "engines": {
     "node": ">=18.17"

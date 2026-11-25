@@ -10,8 +10,16 @@ combustíveis, módulos de engenharia e motores, e base para casa inteligente.
   você envia à IA (se configurada) e o reconhecimento de fala do navegador.
 
 > Auditoria da v1 e o que mudou: [`docs/AUDITORIA.md`](docs/AUDITORIA.md).
+> **Continuando o desenvolvimento (nova conta/novo desenvolvedor)?** Comece por
+> [`CONTINUE_JARVIS.md`](CONTINUE_JARVIS.md) e [`HANDOFF_JARVIS.md`](HANDOFF_JARVIS.md).
 
 ---
+
+## 0. Requisitos
+- **Node.js ≥ 18.17** (desenvolvido e testado em v22.23.5) e **npm** (10.9.9). Sem yarn/pnpm.
+- Navegador: **Chrome/Edge** no PC ou **Chrome no Android** (reconhecimento de fala). Firefox funciona só por texto.
+- Para os testes E2E e para regerar ícones: **Playwright + Chromium** (`npm i -D playwright && npx playwright install chromium`).
+- Opcional: chave de uma IA (seção 3), Home Assistant, `openssl` para HTTPS.
 
 ## 1. Instalação e execução
 
@@ -204,7 +212,40 @@ public/js/              core/ (bus, api, estado, offline-brain), modules/ (ouvid
 config/                 personality.json (tons), news-sources.json
 ```
 
-## 14. Limitações conhecidas
+## 14. Desenvolvimento
+```bash
+npm run dev            # reinicia o servidor ao salvar (node --watch)
+npm test               # testes rápidos (sem internet)
+npm run test:all       # testes + E2E
+npm run backup         # copia data/ para backups/ (sem a chave secreta; --with-key para incluir)
+npm run icons          # regenera os ícones PNG do PWA
+```
+Não há build: edite `public/` e recarregue o navegador (o service worker usa rede primeiro).
+Ao mudar arquivos de `public/` em produção, aumente `VERSION` em `public/sw.js` para o aviso de atualização aparecer.
+
+## 15. Solução de problemas
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Microfone não liga / OUVIDO 🔴 | Sem HTTPS, permissão negada ou navegador sem Web Speech | Use `localhost` ou HTTPS; libere o microfone no cadeado da barra de endereço; use Chrome/Edge |
+| "Reconhecimento precisa de internet" | Chrome processa a fala online | Conecte à internet ou digite |
+| Palmas não disparam | Detector desligado, app em 2º plano ou limiar alto | Ative em Configurações; mantenha o app aberto; ajuste sensibilidade/limiar olhando o medidor |
+| Palmas disparam sozinhas | Ambiente barulhento | Baixe a sensibilidade ou suba o limiar manual |
+| "IA não configurada" | `.env` sem `AI_PROVIDER`/`AI_API_KEY` | Configure (seção 3) e reinicie |
+| "Não consegui confirmar a cotação/os preços atuais" | Fonte fora do ar ou bloqueando acesso | Normal; tente mais tarde (nada é inventado) |
+| Bíblia não carrega no 1º uso | Sem internet para baixar o texto | `npm run bible:download` com internet |
+| Pede token toda hora | `JARVIS_ACCESS_TOKEN` definido e token errado | Digite o token do `.env` |
+| Interface antiga após atualizar | Cache do service worker | Toque em "Atualizar" no aviso, ou recarregue com Ctrl+Shift+R |
+| Memórias protegidas ilegíveis | `data/.secret.key` perdida ou trocada | Restaure a chave original do backup |
+
+## 16. Estado atual
+v2.0.0 estável: **194/194** testes e **27/27** etapas E2E. Não testado em Android físico, com IA real nem com as
+fontes externas ao vivo. Detalhes em [`JARVIS_STATE.md`](JARVIS_STATE.md).
+
+## 17. Continuação do desenvolvimento
+Leia, nesta ordem: `CONTINUE_JARVIS.md` → `HANDOFF_JARVIS.md` → `JARVIS_STATE.md` → `PROJECT_INVENTORY.md` →
+`DECISIONS_JARVIS.md` → `TRANSFER_CHECKLIST.md`. Todo o trabalho está no branch `ccr-8d48bdce-skxdvi`.
+
+## 18. Limitações conhecidas
 - Reconhecimento de fala: Chrome/Edge/Android (online). Firefox não tem; Safari iOS é parcial. Use texto.
 - No Android, palmas e reconhecimento disputam o microfone: as palmas pausam enquanto ele ouve; a
   interrupção por “pare” fica desligada se as palmas estiverem ativas (use duas palmas para interromper).
