@@ -14,10 +14,13 @@ import { tryMath, formatNumber } from '../modules/engineering/math.js';
 import { tryConvert } from '../modules/engineering/units.js';
 import { tryEngineCalc } from '../modules/engine/engine.js';
 import { formatTimeSpoken, formatDateLong } from '../core/time.js';
-import { parseOrdinal, normalize } from '../core/text.js';
+import { parseOrdinal, normalize, recoverOriginal } from '../core/text.js';
 import { getSettings, updateSettings } from '../core/settings.js';
 import * as llm from './llm.js';
 import { isOnline } from '../core/http-client.js';
+import * as tasks from '../modules/tasks/tasks.js';
+import { parseWhen } from '../core/when.js';
+import * as bibleProvider from '../modules/bible/provider.js';
 
 const registry = [];
 
@@ -81,11 +84,116 @@ registerCommand({
   },
 });
 
+export const HELP_TEXT = [
+  '📖 Bíblia — "Bíblia", "onde parei?", "passe a página", "volta", "leia"',
+  '📰 Notícias — "Notícias", "quanto está o dólar?", "quanto está a gasolina?"',
+  '✅ Tarefas — "me lembra de estudar às 19h", "minhas tarefas", "concluí essa", "adia para amanhã"',
+  '🧠 Memória — "lembre que…", "o que você lembra sobre…", "esqueça isso"',
+  '🗓 Rotina — "meu dia"',
+  '🏠 Casa — "ligar a luz da sala" (requer Home Assistant)',
+  '🔧 Engenharia — "15% de 230", "converter 10 km em milhas", "12 volts e 4 ohms"',
+  '🚗 Motor — "potência com 300 Nm a 4000 rpm", "me ajuda com esse motor"',
+  '📊 Status / 🩺 Diagnóstico — "status", "faça um diagnóstico"',
+  '🔇 Silêncio — "fique silencioso", "volte a falar", "pare"',
+];
+
 registerCommand({
-  name: 'system.help', module: 'SISTEMA', priority: 80, description: 'Mostra o que o JARVIS sabe fazer',
-  aliases: ['O que você consegue fazer?'],
-  patterns: [/\b(o que voce (sabe|consegue|pode) fazer|quais (sao )?(os )?(seus )?comandos|lista de comandos|me mostra os comandos)\b/],
-  action: async () => say('Posso conversar, ajudar em estudos, engenharia e motores, fazer contas e conversões, lembrar o que você pedir, acompanhar tarefas, continuar sua leitura da Bíblia, passar páginas, trazer notícias, câmbio e combustíveis, e controlar a casa quando houver integração configurada. Diga, por exemplo, "Bíblia", "Notícias" ou "lembre que...".', { ui: { panel: 'modules' } }),
+  name: 'system.help', module: 'SISTEMA', priority: 80, description: 'Mostra os principais comandos',
+  aliases: ['Ajuda', 'O que você consegue fazer?'],
+  patterns: [/^(ajuda|help|comandos|me ajuda com os comandos|socorro com os comandos)$/, /\b(o que voce (sabe|consegue|pode) fazer|quais (sao )?(os )?(seus )?comandos|lista de comandos|me mostra os comandos|como (eu )?uso voce)\b/],
+  action: async () => say(`Principais comandos:\n${HELP_TEXT.join('\n')}`, {
+    speech: 'Posso cuidar da sua leitura da Bíblia, notícias, tarefas e lembretes, memória, rotina do dia, engenharia, motores e a casa. Também respondo a status, diagnóstico e silêncio. A lista está na tela.',
+    data: { commands: HELP_TEXT },
+  }),
+});
+
+registerCommand({
+  name: 'system.status', module: 'SISTEMA', priority: 80, description: 'Status geral do sistema',
+  aliases: ['Status', 'Como você está?'],
+  patterns: [/^(status|status do sistema|relatorio de status|como estao os sistemas)$/, /\bstatus (geral|do jarvis|dos sistemas)\b/],
+  action: async (_, ctx) => {
+    const online = await isOnline();
+    const ai = llm.status();
+    const c = ctx.client || {};
+    const pend = tasks.list();
+    const bible = reading.plainState();
+    const s = getSettings();
+    const mic = { active: 'ativo', inactive: 'pronto', denied: 'sem permissão', unavailable: 'indisponível' }[c.mic] || 'estado desconhecido';
+    const lines = [
+      `Sistema: online${s.security.safeMode ? ' (modo seguro)' : ''}${s.voice.silent ? ', modo silencioso' : ''}.`,
+      `Internet: ${online ? 'conectada' : 'indisponível — modo offline'}.`,
+      `IA: ${ai.configured ? `${ai.providerName}, modelo ${ai.model}${ai.lastError ? ` (último erro: ${ai.lastError.message})` : ''}` : 'não configurada — modo local'}.`,
+      `Microfone: ${mic}. Reconhecimento de fala: ${c.hearing === false ? 'indisponível neste navegador' : 'disponível'}.`,
+      `Voz: ${c.voice === false ? 'indisponível' : s.voice.silent ? 'silenciada' : 'ativa'}.`,
+      `Memória: ${memory.list('facts').length} memórias, ${memory.list('preferences').length} preferências.`,
+      `Bíblia: ${bible.plan && !bible.plan.completedAt ? `leitura ${bible.plan.label} em andamento` : `próxima leitura em ${refLabel(bible.position)}`}; sequência de ${bible.streak} dia(s); texto ${bibleProvider.status().offline ? 'salvo offline' : 'ainda não baixado'}.`,
+      `Notícias: ${online ? 'fontes acessíveis' : 'indisponíveis sem internet'}.`,
+      `Tarefas: ${pend.length} pendente(s).`,
+    ];
+    return say(lines.join('\n'), { speech: lines.slice(0, 3).concat(lines[8]).join(' '), data: { online, ai, pending: pend.length } });
+  },
+});
+
+registerCommand({
+  name: 'system.silent_on', module: 'VOZ', priority: 95, description: 'Modo silencioso (só texto)', mutates: true,
+  aliases: ['Fique silencioso', 'Modo silencioso'],
+  patterns: [/\b(fique|fica|ficar|entr\w+ (em|no)) (em )?(silencio(so)?|modo silencioso|mudo)\b/, /\b(ativ\w+|lig\w+) (o )?modo silencioso\b/, /^modo silencioso$/, /\bnao fale mais\b/],
+  action: async () => { updateSettings({ voice: { silent: true } }); return say('Modo silencioso ativado. Continuo respondendo na tela.', { speech: '', clientActions: ['stopSpeech'] }); },
+});
+
+registerCommand({
+  name: 'system.silent_off', module: 'VOZ', priority: 95, description: 'Volta a falar', mutates: true,
+  aliases: ['Volte a falar'],
+  patterns: [/\b(volt\w+ a falar|pode falar|fal\w+ de novo|desativ\w+ (o )?modo silencioso|sair do modo silencioso|sai do silencio)\b/],
+  action: async () => { updateSettings({ voice: { silent: false, enabled: true } }); return say('Voltei a falar.'); },
+});
+
+registerCommand({
+  name: 'voice.pause', module: 'VOZ', priority: 99, description: 'Pausa a fala',
+  aliases: ['Pausa'],
+  patterns: [/^(pausa|pause|pausar|espera|espera ai|aguarda)$/],
+  action: async () => say('Pausado.', { speech: '', clientActions: ['pauseSpeech'] }),
+});
+
+registerCommand({
+  name: 'voice.resume', module: 'VOZ', priority: 99, description: 'Continua a fala pausada',
+  aliases: ['Continua a falar'],
+  patterns: [/^(continua a falar|pode continuar|continue falando|retoma|retomar a fala|despausa)$/],
+  action: async () => say('Continuando.', { speech: '', clientActions: ['resumeSpeech'] }),
+});
+
+registerCommand({
+  name: 'system.selftest', module: 'SISTEMA', priority: 85, description: 'Auto-diagnóstico completo',
+  aliases: ['Faça um diagnóstico'],
+  patterns: [/\b(faca|faz|fazer|rode|roda|execute|inicie) (um |o )?(auto ?diagnostico|diagnostico|teste (do|de) sistemas?|checagem)\b/, /^(auto ?diagnostico|diagnostico completo|teste o sistema|testar sistemas?)$/],
+  action: async () => say('Iniciando diagnóstico completo…', { ui: { panel: 'selftest' } }),
+});
+
+registerCommand({
+  name: 'routine.day', module: 'ROTINA', priority: 79, description: 'Resumo do seu dia',
+  aliases: ['Meu dia', 'O que tenho hoje?'],
+  patterns: [/^(o )?meu dia$/, /\b(como (esta|vai ser) (o )?meu dia|resumo do (meu )?dia|o que (eu )?tenho (pra|para) hoje|minha agenda( de hoje)?|agenda de hoje|planeja meu dia)\b/],
+  action: async (_, ctx) => {
+    const t = tasks.today();
+    const bible = await reading.current(ctx.pageSize).catch(() => null);
+    const online = await isOnline();
+    const ex = online ? await getExchange().catch(() => null) : null;
+    const lines = ['Seu dia, por prioridade:'];
+    const speech = [];
+    if (t.overdue.length) { lines.push(`⚠ Atrasadas: ${t.overdue.map((x) => tasks.describe(x)).join('; ')}`); speech.push(`Você tem ${t.overdue.length} tarefa${t.overdue.length > 1 ? 's' : ''} atrasada${t.overdue.length > 1 ? 's' : ''}.`); }
+    if (t.today.length) { lines.push(`⏰ Hoje: ${t.today.map((x) => tasks.describe(x)).join('; ')}`); speech.push(`Para hoje: ${t.today.map((x) => tasks.describe(x)).join('; ')}.`); }
+    if (t.undated.length) lines.push(`📝 Sem data: ${t.undated.map((x) => x.text).join('; ')}`);
+    if (!t.overdue.length && !t.today.length) speech.push('Nenhum compromisso marcado para hoje.');
+    if (bible?.plan) {
+      const done = !!bible.plan.completedAt && bible.plan.isToday;
+      lines.push(`📖 Bíblia: ${done ? `leitura de hoje concluída (${bible.plan.label})` : `${bible.plan.label} — ${bible.plan.done}/${bible.plan.total} capítulos`} · sequência ${bible.streak} dia(s)`);
+      speech.push(done ? 'A leitura bíblica de hoje já está concluída.' : `Leitura bíblica: ${bible.plan.label}.`);
+    } else if (bible) { lines.push(`📖 Bíblia: próxima leitura começa em ${bible.position.label}`); speech.push(`Leitura bíblica pendente, começando em ${bible.position.label}.`); }
+    if (ex?.ok) { const usd = ex.rates.find((r) => r.code === 'USD'); if (usd) lines.push(`💰 Dólar: R$ ${usd.value.toFixed(2).replace('.', ',')} (${new Date(usd.updatedAt).toLocaleTimeString('pt-BR', { timeZone: process.env.JARVIS_TIMEZONE || 'America/Araguaina', hour: '2-digit', minute: '2-digit' })})`); }
+    if (t.upcoming.length) lines.push(`📅 Próximos: ${t.upcoming.map((x) => tasks.describe(x)).join('; ')}`);
+    lines.push(online ? '📰 Diga "Notícias" para o resumo do dia.' : '📡 Sem internet: notícias e câmbio indisponíveis.');
+    return say(lines.join('\n'), { speech: speech.join(' '), data: { tasks: t, bible: bible?.plan || null } });
+  },
 });
 
 registerCommand({
@@ -149,7 +257,20 @@ registerCommand({
   patterns: [(t) => (/\bonde (eu )?parei\b/.test(t) && !/\b(continu|retom|segu)\w*/.test(t) ? [t] : null), /\b(qual|que|em que) (e a )?leitura de hoje\b/, /\bem que capitulo\b/, /\b(qual|que) capitulo\b/],
   action: async (_, ctx) => {
     const v = await reading.current(ctx.pageSize);
-    return say(reading.whereAmI(), { ui: ctx.sess.context.activeModule === 'bible' ? bibleUi(v) : undefined });
+    return say(reading.whereAmI(ctx.pageSize), { ui: ctx.sess.context.activeModule === 'bible' ? bibleUi(v) : undefined, data: { ref: v.ref, verse: v.verses[0]?.n ?? null, page: v.pageIndex + 1, pageCount: v.pageCount } });
+  },
+});
+
+registerCommand({
+  name: 'bible.read_aloud', module: 'BÍBLIA', priority: 70, description: 'Lê a página atual em voz alta (modo leitura)',
+  aliases: ['Leia', 'Leia para mim', 'Ler em voz alta'],
+  patterns: [/^(leia|le|ler|leia (a pagina|pra mim|para mim|isso|o texto|em voz alta)|le pra mim|ler em voz alta|modo leitura)$/],
+  action: async (_, ctx) => {
+    if (ctx.sess.context.activeModule !== 'bible') await reading.openDaily(ctx.pageSize);
+    ctx.sess.context.activeModule = 'bible';
+    const { view, text } = await reading.pageText(ctx.pageSize);
+    if (!text) return say(view.error, { ui: bibleUi(view) });
+    return say(`Lendo ${view.ref.label}, página ${view.pageIndex + 1} de ${view.pageCount}.`, { speech: text, speechMode: 'reading', ui: bibleUi(view) });
   },
 });
 
@@ -179,7 +300,7 @@ registerCommand({
   aliases: ['Passe a página', 'Próxima página', 'Avança', 'Próxima'],
   patterns: [
     /\b(pass\w*|vir\w+|avanc\w+|segu\w+|vai pra|vai para|ir para|mud\w+) (a |de |para a |pra )?(proxima )?pagina\b/, /\bproxima pagina\b/, /\bpagina seguinte\b/,
-    (t, s) => (bibleActive(s) && /^(proxima|proximo|avanca|avance|avancar|segue|seguir|pode passar|passa|passe|vai|continua|continue|adiante|mais|pra frente|para frente|vira)$/.test(t) ? [t] : null),
+    (t, s) => (bibleActive(s) && /^(proxima|proximo|avanca|avance|avancar|segue|seguir|pode passar|passa|passe|vai|continua|continue|adiante|mais|pra frente|para frente|vira|vira a pagina|proxima ai)$/.test(t) ? [t] : null),
   ],
   action: async (_, ctx) => { const v = await reading.turnPage('next', ctx.pageSize); ctx.sess.context.activeModule = 'bible'; return say(v.message || `Página ${v.pageIndex + 1} de ${v.pageCount}.`, { speech: v.message || '', ui: bibleUi(v), animate: 'next' }); },
 });
@@ -189,7 +310,7 @@ registerCommand({
   aliases: ['Volta a página', 'Página anterior', 'Voltar'],
   patterns: [
     /\b(volt\w+|retorn\w+) (a |uma |para a |pra )?pagina\b/, /\bpagina anterior\b/,
-    (t, s) => (bibleActive(s) && /^(volta|volte|voltar|anterior|retorna|retornar|para tras|pra tras|volta ai|volta uma)$/.test(t) ? [t] : null),
+    (t, s) => (bibleActive(s) && /^(volta|volte|voltar|anterior|retorna|retornar|para tras|pra tras|volta ai|volta uma|volta uma pagina|volta um pouco)$/.test(t) ? [t] : null),
   ],
   action: async (_, ctx) => { const v = await reading.turnPage('prev', ctx.pageSize); ctx.sess.context.activeModule = 'bible'; return say(v.message || `Página ${v.pageIndex + 1} de ${v.pageCount}.`, { speech: v.message || '', ui: bibleUi(v), animate: 'prev' }); },
 });
@@ -329,41 +450,109 @@ function previousUserText(sess) {
   return users.length >= 2 ? users[users.length - 2].content : null;
 }
 
+// ======================= TAREFAS / LEMBRETES =======================
+const taskRefs = (sess) => sess.context.lastTaskId;
+const users = (sess) => sess.history.filter((h) => h.role === 'user');
+function resolveTask(t, sess) {
+  const pend = tasks.list();
+  const n = (t.match(/\b(?:tarefa|lembrete|numero)\s+(\w+)/) || [])[1];
+  if (n && parseOrdinal(n)) return pend[parseOrdinal(n) - 1] || null;
+  const last = taskRefs(sess) && pend.find((x) => x.id === taskRefs(sess));
+  if (last) return last;
+  return pend.length === 1 ? pend[0] : null;
+}
+
 registerCommand({
-  name: 'memory.task_list', module: 'MEMÓRIA', priority: 60, description: 'Lista tarefas',
-  aliases: ['Quais são minhas tarefas?'],
-  patterns: [/\b(minhas tarefas|quais (sao )?(as |minhas )?tarefas|lista de tarefas|tarefas pendentes)\b/],
-  action: async () => {
-    const tasks = memory.list('tasks').filter((t) => !t.done);
-    return say(tasks.length ? `Você tem ${tasks.length} tarefa${tasks.length > 1 ? 's' : ''}: ${tasks.map((t, i) => `${i + 1}) ${t.text}`).join('; ')}.` : 'Nenhuma tarefa pendente.');
+  name: 'task.reminder', module: 'TAREFAS', priority: 61, mutates: true, description: 'Cria lembrete com data/hora',
+  aliases: ['Me lembra de estudar às 19h', 'Me lembra disso amanhã', 'Me avisa daqui a 20 minutos para tirar o bolo'],
+  patterns: [/^(me lembr\w+|lembr\w+ me|me avis\w+|avis\w+ me|cria\w* (um )?lembrete|lembrete|marca\w*)\b(.*)$/],
+  params: (t, m, s) => {
+    const when = parseWhen(t);
+    let text = (when ? when.rest : t).replace(/^(me lembr\w+|lembr\w+ me|me avis\w+|avis\w+ me|cria\w* (um )?lembrete|lembrete|marca\w*)\s*(de|que|para|pra|da|do|sobre)?\s*/, '').trim();
+    if (!text || /^(disso|isso|isto)$/.test(text)) {
+      const prev = users(s);
+      text = prev.length >= 2 ? prev[prev.length - 2].content : '';
+    }
+    // Devolve o trecho com acentos/maiúsculas originais (ou a frase anterior, já original).
+    text = recoverOriginal(s.lastRaw, text.replace(/^(de|que|para|pra)\s+/, ''));
+    return { text: text.charAt(0).toUpperCase() + text.slice(1), when };
+  },
+  action: async ({ text, when }, ctx) => {
+    if (!text) return say('Do que você quer que eu te lembre?');
+    if (memory.detectSensitive(text)) return say('Isso parece conter dados sensíveis. Não vou salvar em um lembrete.');
+    const task = tasks.add(text, when ? { dueAt: when.date, hasTime: when.hasTime } : {});
+    ctx.sess.context.lastTaskId = task.id;
+    const perm = ctx.client?.notifications;
+    const note = when && perm !== 'granted' ? ' Para receber o aviso, mantenha o JARVIS aberto' + (perm === 'unsupported' ? ' (este navegador não suporta notificações).' : ' ou ative as notificações nas configurações.') : '';
+    return say(when ? `Lembrete criado: ${text}, ${when.label}.${note}` : `Anotado: ${text}. Sem data definida — diga, por exemplo, "adia para amanhã às 9h" para marcar um horário.`, { data: { task } });
   },
 });
 
 registerCommand({
-  name: 'memory.task_add', mutates: true, module: 'MEMÓRIA', priority: 60, description: 'Adiciona tarefa',
+  name: 'task.list', module: 'TAREFAS', priority: 60, description: 'Lista tarefas e lembretes',
+  aliases: ['Quais são minhas tarefas?', 'Meus lembretes'],
+  patterns: [/\b(minhas tarefas|quais (sao )?(as |minhas )?tarefas|lista de tarefas|tarefas pendentes|meus lembretes|quais (sao )?(os |meus )?lembretes|o que (eu )?tenho (pra|para) fazer)\b/],
+  action: async (_, ctx) => {
+    const pend = tasks.list();
+    if (pend.length === 1) ctx.sess.context.lastTaskId = pend[0].id;
+    return say(pend.length ? `Você tem ${pend.length} tarefa${pend.length > 1 ? 's' : ''}:\n${pend.map((t, i) => `${i + 1}) ${tasks.describe(t)}`).join('\n')}` : 'Nenhuma tarefa pendente.', { data: { tasks: pend } });
+  },
+});
+
+registerCommand({
+  name: 'task.add', module: 'TAREFAS', priority: 60, mutates: true, description: 'Adiciona tarefa',
   aliases: ['Adicione a tarefa trocar o óleo'],
   patterns: [/\b(adicion\w+|cri\w+|anot\w+|coloc\w+|nova) (uma |a |na lista )?tarefas?:?\s+(?:de |para |pra )?(.+)$/],
-  params: (t, m, s) => ({ text: (s.lastRaw.match(/tarefas?:?\s+(?:de |para |pra )?(.+)$/i) || [])[1] || m[3] }),
-  action: async ({ text }) => {
-    const sens = memory.detectSensitive(text);
-    if (sens) return say(`Isso parece conter ${sens}. Por segurança, não vou salvar.`);
-    memory.add('tasks', text);
-    return say(`Tarefa anotada: ${text}.`);
+  params: (t, m, s) => { const when = parseWhen(m[3]); return { text: recoverOriginal(s.lastRaw, (when ? when.rest : m[3]).trim()), when }; },
+  action: async ({ text, when }, ctx) => {
+    if (memory.detectSensitive(text)) return say('Isso parece conter dados sensíveis. Por segurança, não vou salvar.');
+    const task = tasks.add(text, when ? { dueAt: when.date, hasTime: when.hasTime } : {});
+    ctx.sess.context.lastTaskId = task.id;
+    return say(`Tarefa anotada: ${text}${when ? `, ${when.label}` : ''}.`, { data: { task } });
   },
 });
 
 registerCommand({
-  name: 'memory.task_done', mutates: true, module: 'MEMÓRIA', priority: 60, description: 'Conclui tarefa',
-  aliases: ['Conclui a tarefa 1'],
-  patterns: [/\b(conclu\w+|termin\w+|marc\w+ como feita|finaliz\w+) (a )?tarefa (\w+)/],
-  params: (t, m) => ({ n: parseOrdinal(m[3]) }),
-  action: async ({ n }) => {
-    const tasks = memory.list('tasks').filter((t) => !t.done);
-    const task = tasks[(n || 1) - 1];
-    if (!task) return say('Não encontrei essa tarefa.');
-    memory.updateItem(task.id, { done: true });
-    return say(`Tarefa concluída: ${task.text}.`);
+  name: 'task.done', module: 'TAREFAS', priority: 62, mutates: true, description: 'Conclui tarefa ("concluí essa")',
+  aliases: ['Concluí essa', 'Conclui a tarefa 1', 'Já fiz'],
+  patterns: [/^(conclui|concluido|feito|ja fiz|fiz|terminei|pronto|done)( essa| esta| isso| ela| a tarefa| o lembrete)?$/, /\b(conclu\w+|termin\w+|marc\w+ como feita|finaliz\w+|risca\w*) (a |essa |esta |o )?(tarefa|lembrete)\s*(\w+)?/],
+  params: (t, m, s) => ({ task: resolveTask(t, s) }),
+  action: async ({ task }) => {
+    if (!task) return say('Qual tarefa? Diga "concluí a tarefa 1" ou peça "minhas tarefas" para ver a lista.');
+    tasks.complete(task.id);
+    return say(`Concluída: ${task.text}. 👍`);
   },
+});
+
+registerCommand({
+  name: 'task.cancel', module: 'TAREFAS', priority: 62, permission: 'confirm', description: 'Cancela tarefa/lembrete',
+  aliases: ['Cancela essa tarefa', 'Cancela o lembrete 2'],
+  patterns: [/\b(cancel\w+|desmarc\w+|remov\w+|apag\w+) (essa |esta |a |o )?(tarefa|lembrete)\s*(\w+)?/],
+  params: (t, m, s) => ({ task: resolveTask(t, s) }),
+  confirmText: ({ task }) => (task ? `Cancelar a tarefa "${task.text}"?` : null),
+  action: async ({ task }) => { if (!task) return say('Não encontrei essa tarefa.'); tasks.cancel(task.id); return say(`Tarefa cancelada: ${task.text}.`); },
+});
+
+registerCommand({
+  name: 'task.postpone', module: 'TAREFAS', priority: 62, mutates: true, description: 'Adia tarefa/lembrete',
+  aliases: ['Adia para amanhã', 'Adia a tarefa 1 para as 20h'],
+  patterns: [/\b(adia|adie|adiar|adiou|adiando|remarc\w+|empurr\w+|transfer\w+)\b(.*)$/],
+  params: (t, m, s) => ({ task: resolveTask(t, s), when: parseWhen(t) }),
+  action: async ({ task, when }, ctx) => {
+    if (!task) return say('Qual tarefa devo adiar? Diga, por exemplo, "adia a tarefa 1 para amanhã".');
+    if (!when) return say('Para quando? Ex.: "adia para amanhã às 9h".');
+    tasks.postpone(task.id, when.date, when.hasTime);
+    ctx.sess.context.lastTaskId = task.id;
+    return say(`Adiado: ${task.text}, agora ${when.label}.`);
+  },
+});
+
+registerCommand({
+  name: 'task.edit', module: 'TAREFAS', priority: 62, mutates: true, description: 'Edita o texto de uma tarefa',
+  aliases: ['Muda a tarefa 1 para comprar pão integral'],
+  patterns: [/\b(muda|mude|altera|altere|edita|edite|troca|troque) (a |essa )?(tarefa|lembrete)\s*(\w+)? para (.+)$/],
+  params: (t, m, s) => ({ task: resolveTask(t, s), text: recoverOriginal(s.lastRaw, m[5]) }),
+  action: async ({ task, text }) => { if (!task) return say('Não encontrei essa tarefa.'); tasks.edit(task.id, text); return say(`Tarefa alterada para: ${text}.`); },
 });
 
 registerCommand({
@@ -383,11 +572,13 @@ registerCommand({
     if (!text) return say('O que você quer que eu lembre?');
     const sens = memory.detectSensitive(text);
     if (sens && !ctx.confirmed) {
-      ctx.sess.pending = { name: 'memory.remember', params: { text, kind }, question: `Isso parece conter ${sens}. Guardar dados sensíveis não é recomendado. Quer mesmo que eu salve?` };
+      ctx.sess.pending = { name: 'memory.remember', params: { text, kind }, question: `Isso parece conter ${sens}. Se confirmar, guardo criptografado e só mostro na tela após nova confirmação. Quer mesmo salvar?` };
       return say(ctx.sess.pending.question, { awaitingConfirmation: true });
     }
-    memory.add(kind, text.replace(/[.!]+$/, ''));
-    return say(`Certo, vou lembrar: ${text.replace(/[.!]+$/, '')}.`);
+    const clean = text.replace(/[.!]+$/, '');
+    const item = memory.add(kind, clean, sens ? { sensitive: sens, hint: normalize(clean).split(' ').filter((w) => !/\d/.test(w)).slice(0, 6).join(' ') } : {});
+    ctx.sess.context.lastMemoryId = item.id;
+    return say(sens ? `Guardado de forma protegida (${sens}). Não vou repetir em voz alta.` : `Certo, vou lembrar: ${clean}.`, { data: { memory: item } });
   },
 });
 
@@ -399,16 +590,18 @@ registerCommand({
     const q = (m[4] || '').replace(/^\s*(sobre|de|que)\s+/, '').trim();
     let target = null;
     if (q.length > 2) target = memory.search(q, { limit: 1, min: 0.1 })[0];
-    else {
+    else if (s.context.lastMemoryId) target = [...memory.list('facts'), ...memory.list('preferences')].find((x) => x.id === s.context.lastMemoryId);
+    if (!target && q.length <= 2) {
       const all = [...memory.list('facts'), ...memory.list('preferences'), ...memory.list('tasks')].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       target = all[0];
     }
     return { target };
   },
   confirmText: ({ target }) => (target ? `Tem certeza que deseja apagar esta memória: "${target.text}"?` : null),
-  action: async ({ target }) => {
+  action: async ({ target }, ctx) => {
     if (!target) return say('Não encontrei nenhuma memória correspondente.');
     memory.remove(target.id);
+    if (ctx.sess.context.lastMemoryId === target.id) ctx.sess.context.lastMemoryId = null;
     return say('Memória apagada.');
   },
 });
@@ -425,8 +618,24 @@ registerCommand({
       else q = previousUserText(ctx.sess) || '';
     }
     const items = q ? memory.search(q, { limit: 5 }) : [...memory.list('facts'), ...memory.list('preferences')].slice(-8);
+    if (items.length) ctx.sess.context.lastMemoryId = items[0].id;
+    const prot = items.find((i) => i.protected);
+    if (prot) {
+      ctx.sess.pending = { name: 'memory.reveal', params: { id: prot.id }, question: 'Tenho uma informação protegida sobre isso. Quer que eu mostre na tela? (não vou falar em voz alta)' };
+      const others = items.filter((i) => !i.protected);
+      return say(`${others.length ? `Lembro disso: ${others.map((i) => i.text).join('; ')}. ` : ''}${ctx.sess.pending.question}`, { awaitingConfirmation: true });
+    }
     if (!items.length) return say(q ? 'Não tenho nada guardado sobre isso.' : 'Ainda não tenho memórias guardadas. Diga "lembre que..." para eu guardar algo.');
     return say(`Lembro disso: ${items.map((i) => i.text).join('; ')}.`);
+  },
+});
+
+registerCommand({
+  name: 'memory.reveal', module: 'MEMÓRIA', priority: 0, permission: 'confirm', description: 'Mostra memória protegida (após confirmação)',
+  patterns: [/^\b$/], // só acionado por confirmação
+  action: async ({ id }) => {
+    const text = memory.reveal(id);
+    return text ? say(`🔒 ${text}`, { speech: 'Mostrei a informação na tela.', sensitive: true }) : say('Não encontrei essa memória.');
   },
 });
 

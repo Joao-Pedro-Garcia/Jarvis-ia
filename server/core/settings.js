@@ -3,10 +3,11 @@ import { load, save } from './store.js';
 import { bus, EVENTS } from './events.js';
 
 export const DEFAULT_SETTINGS = {
-  voice: { enabled: true, rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', maxSpokenChars: 600 },
+  voice: { enabled: true, silent: false, bargeIn: true, rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', maxSpokenChars: 600 },
   hearing: { lang: 'pt-BR', silenceMs: 1800, continuousConversation: true, wakeWord: false, wakeWordName: 'jarvis' },
-  clap: { enabled: false, sensitivity: 0.6, minGapMs: 120, maxGapMs: 700, maxClapMs: 110, cooldownMs: 2500 },
-  ui: { theme: 'ciano', animations: true, mode: 'desempenho', particles: true },
+  clap: { enabled: false, sensitivity: 0.6, minGapMs: 120, maxGapMs: 700, maxClapMs: 110, cooldownMs: 2500, thresholdOverride: 0 },
+  ui: { theme: 'ciano', animations: true, mode: 'desempenho', particles: true, keepAwake: false },
+  notifications: { enabled: false },
   privacy: { saveConversationLogs: false, allowWebSearch: true },
   security: { safeMode: false },
   bible: { pageSizeOverride: 0 },

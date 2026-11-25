@@ -9,7 +9,7 @@ export async function fetchWithTimeout(url, { timeout = 12000, headers = {}, ...
   try {
     const res = await fetch(url, {
       ...opts,
-      headers: { 'User-Agent': 'Mozilla/5.0 (JARVIS assistente pessoal)', Accept: '*/*', ...headers },
+      headers: { 'User-Agent': 'JARVIS-assistente-pessoal/2.0 (uso pessoal; Node.js)', Accept: '*/*', ...headers },
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);

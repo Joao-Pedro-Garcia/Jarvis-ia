@@ -5,6 +5,7 @@ import path from 'node:path';
 import { CONFIG_DIR } from '../../core/paths.js';
 import { fetchWithTimeout, cached } from '../../core/http-client.js';
 import { log } from '../../core/logger.js';
+import { setHealth } from '../../core/health.js';
 
 const TTL = 10 * 60 * 1000; // 10 minutos
 export const MAX_AGE_HOURS = 36;
@@ -64,6 +65,7 @@ export async function fetchAll() {
     const failed = [];
     results.forEach((r, i) => (r.status === 'fulfilled' ? items.push(...r.value) : failed.push(list[i].name)));
     if (failed.length) log.warn('noticias', `Feeds indisponíveis: ${failed.join(', ')}`);
+    setHealth('noticias', failed.length === 0 ? 'ok' : failed.length < list.length ? 'limited' : 'fail', `${list.length - failed.length}/${list.length} fontes${failed.length ? ` · fora: ${failed.join(', ')}` : ''}`);
     const cutoff = Date.now() - MAX_AGE_HOURS * 3600 * 1000;
     // Regra de atualidade: sem data ou antigas são descartadas.
     const fresh = items.filter((it) => it.publishedAt && Date.parse(it.publishedAt) >= cutoff && Date.parse(it.publishedAt) <= Date.now() + 3600e3);

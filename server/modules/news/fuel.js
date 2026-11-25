@@ -5,12 +5,14 @@
 import { fetchWithTimeout, cached } from '../../core/http-client.js';
 import { log } from '../../core/logger.js';
 import { normalize } from '../../core/text.js';
+import { load, save } from '../../core/store.js';
+import { setHealth } from '../../core/health.js';
 
 const BASE = 'https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/shpc/qus';
 const GAS_URL = () => process.env.FUEL_GASOLINE_CSV || `${BASE}/ultimas-4-semanas-gasolina-etanol.csv`;
 const DIESEL_URL = () => process.env.FUEL_DIESEL_CSV || `${BASE}/ultimas-4-semanas-diesel-gnv.csv`;
 const TTL = 6 * 60 * 60 * 1000; // pesquisa é semanal
-const PRODUCTS = { GASOLINA: 'Gasolina comum', 'DIESEL S10': 'Diesel S-10', DIESEL: 'Diesel comum' };
+const PRODUCTS = { GASOLINA: 'Gasolina comum', DIESEL: 'Diesel comum', 'DIESEL S10': 'Diesel S-10' };
 
 function decode(buf) {
   const utf = new TextDecoder('utf-8').decode(buf);
@@ -79,27 +81,84 @@ function pick(agg, scope, key) {
   return a ? { product: PRODUCTS[key], average: +(a.sum / a.n).toFixed(3), samples: a.n } : null;
 }
 
+const ORDER = ['GASOLINA', 'DIESEL', 'DIESEL S10'];
+const OPEN_DATA_PAGE = 'https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/serie-historica-de-precos-de-combustiveis';
+const LAST_FILE = 'fuel-last';
+const OUTDATED_DAYS = 14;
+
+async function fetchCsvPair(urls, label) {
+  const results = await Promise.allSettled(urls.map(async (url) => {
+    const res = await fetchWithTimeout(url, { timeout: 45000 });
+    return aggregateCsv(decode(new Uint8Array(await res.arrayBuffer())));
+  }));
+  const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  const errors = results.filter((r) => r.status === 'rejected').map((r) => r.reason.message);
+  if (!ok.length) throw new Error(`${label}: ${errors.join('; ')}`);
+  return { agg: Object.assign({}, ...ok.map((o) => o.agg)), period: ok.map((o) => o.period).sort((x, y) => y.to.localeCompare(x.to))[0], partial: errors.length > 0, label };
+}
+
+/** Descobre na página de dados abertos da ANP os CSVs mensais mais recentes (fonte reserva). */
+export function parseMonthlyLinks(html) {
+  const links = [...html.matchAll(/href="(https:\/\/www\.gov\.br\/anp\/[^"]*\/shpc\/dsan\/(\d{4})\/[^"]*)"/g)].map((m) => ({ url: m[1], year: Number(m[2]) }));
+  const latest = (kind) => links.filter((l) => l.url.includes(kind))
+    .map((l) => ({ ...l, month: Number((l.url.match(/\/(\d{2})-|-(\d{2})\.csv$/) || []).slice(1).find(Boolean) || 0) }))
+    .sort((x, y) => y.year - x.year || y.month - x.month)[0]?.url;
+  return [latest('gasolina-etanol'), latest('diesel-gnv')].filter(Boolean);
+}
+
+async function discoverMonthly() {
+  const res = await fetchWithTimeout(OPEN_DATA_PAGE, { timeout: 20000 });
+  const urls = parseMonthlyLinks(await res.text());
+  if (!urls.length) throw new Error('nenhum CSV mensal encontrado no portal');
+  return urls;
+}
+
+function build(data, uf) {
+  const prices = (scope) => ORDER.map((k) => pick(data.agg, scope, k)).filter(Boolean);
+  const ageDays = Math.round((Date.now() - Date.parse(`${data.period.to}T12:00:00-03:00`)) / 86400000);
+  return {
+    ok: true,
+    state: { uf, name: uf === 'TO' ? 'Tocantins' : uf, prices: prices(uf) },
+    brazil: { prices: prices('BR') },
+    period: data.period,
+    method: 'Preço médio (média simples das coletas do período mais recente da pesquisa)',
+    source: `ANP — Levantamento de Preços de Combustíveis (${data.label})`,
+    partial: data.partial,
+    outdated: ageDays > OUTDATED_DAYS,
+    ageDays,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Preços médios. Fontes, em ordem: (1) pesquisa semanal da ANP, (2) série
+ * mensal da ANP (descoberta na página de dados abertos). Se nada responder,
+ * NÃO apresenta dado antigo como atual: devolve ok:false e, separadamente,
+ * a última pesquisa obtida (`lastKnown`) com período e data da consulta.
+ */
 export async function getFuel(uf = 'TO') {
   return cached(`fuel-${uf}`, TTL, async () => {
-    const results = await Promise.allSettled([GAS_URL(), DIESEL_URL()].map(async (url) => {
-      const res = await fetchWithTimeout(url, { timeout: 45000 });
-      return aggregateCsv(decode(new Uint8Array(await res.arrayBuffer())));
-    }));
-    const errors = results.filter((r) => r.status === 'rejected').map((r) => r.reason.message);
-    if (errors.length) log.warn('noticias', `ANP: ${errors.join('; ')}`);
-    const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-    if (!ok.length) return { ok: false, error: 'Não consegui obter a pesquisa de preços da ANP neste momento.', fetchedAt: new Date().toISOString() };
-    const agg = Object.assign({}, ...ok.map((o) => o.agg));
-    const period = ok[0].period;
-    const build = (scope) => ['GASOLINA', 'DIESEL S10', 'DIESEL'].map((k) => pick(agg, scope, k)).filter(Boolean);
+    const attempts = [
+      () => fetchCsvPair([GAS_URL(), DIESEL_URL()], 'semanal, últimas 4 semanas'),
+      async () => fetchCsvPair(await discoverMonthly(), 'série mensal'),
+    ];
+    const errors = [];
+    for (const attempt of attempts) {
+      try {
+        const out = build(await attempt(), uf);
+        save(LAST_FILE, { ...out, savedAt: new Date().toISOString() });
+        setHealth('combustiveis', out.outdated || out.partial || /mensal/.test(out.source) ? 'limited' : 'ok', `${out.source} · até ${out.period.to}`);
+        if (out.outdated) log.warn('noticias', `ANP: pesquisa mais recente obtida termina em ${out.period.to}`);
+        return out;
+      } catch (err) { errors.push(err.message); log.warn('noticias', `Combustíveis: ${err.message}`); }
+    }
+    setHealth('combustiveis', 'fail', `Nenhuma fonte da ANP respondeu: ${errors.join(' | ')}`);
+    const last = load(LAST_FILE, {});
     return {
-      ok: true,
-      state: { uf, name: uf === 'TO' ? 'Tocantins' : uf, prices: build(uf) },
-      brazil: { prices: build('BR') },
-      period,
-      method: 'Preço médio (média simples das coletas da semana mais recente)',
-      source: 'ANP — Levantamento de Preços de Combustíveis (dados abertos)',
-      partial: errors.length > 0,
+      ok: false,
+      error: 'Não consegui confirmar os preços atuais.',
+      reasons: errors,
+      lastKnown: last.ok ? { period: last.period, savedAt: last.savedAt, state: last.state, brazil: last.brazil, source: last.source } : null,
       fetchedAt: new Date().toISOString(),
     };
   });

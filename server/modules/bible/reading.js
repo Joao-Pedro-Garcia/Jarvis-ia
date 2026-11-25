@@ -240,14 +240,19 @@ export async function openReference(ref, pageSize) {
 
 export async function current(pageSize) { return view(state(), pageSize); }
 
-export function whereAmI() {
+function pos(ref, verse, pageSize) {
+  const ps = clampPageSize(pageSize);
+  return `${refLabel(ref)}, versículo ${verse + 1}, página ${Math.floor(verse / ps) + 1}`;
+}
+
+export function whereAmI(pageSize = 8) {
   const s = state();
   if (s.reader.mode === 'free' && s.reader.free) {
-    return `Você está lendo ${refLabel(s.reader.free)} em leitura livre. No plano diário, ${s.plan && !s.plan.completedAt ? `a leitura pendente é ${s.plan.label}, em ${refLabel(s.plan.chapters[s.plan.current])}` : `a próxima leitura começa em ${refLabel(s.position)}`}.`;
+    return `Você está lendo ${pos(s.reader.free, s.reader.free.verse, pageSize)} em leitura livre. No plano diário, ${s.plan && !s.plan.completedAt ? `a leitura pendente é ${s.plan.label}, em ${refLabel(s.plan.chapters[s.plan.current])}` : `a próxima leitura começa em ${refLabel(s.position)}`}.`;
   }
   if (s.plan && !s.plan.completedAt) {
     const done = s.plan.completed.filter(Boolean).length;
-    return `Você está em ${refLabel(s.plan.chapters[s.plan.current])}, na leitura ${s.plan.label}. ${done} de ${s.plan.chapters.length} capítulos concluídos.`;
+    return `Você parou em ${pos(s.plan.chapters[s.plan.current], s.plan.verse, pageSize)}, na leitura ${s.plan.label}. ${done} de ${s.plan.chapters.length} capítulos concluídos.`;
   }
   if (s.plan?.completedAt) return `Sua última leitura concluída foi ${s.plan.label}. A próxima começa em ${refLabel(s.position)}.`;
   return `Você ainda não começou. A primeira leitura será ${rangeLabel(buildPlan(s.position, s.chaptersPerDay, localDate()).chapters)}.`;
@@ -268,3 +273,10 @@ export function updateSettings({ chaptersPerDay, position }) {
 }
 
 export function plainState() { return state(); }
+
+/** Texto da página atual para leitura em voz alta (modo leitura). */
+export async function pageText(pageSize) {
+  const v = await view(state(), pageSize);
+  if (v.error) return { view: v, text: null };
+  return { view: v, text: `${v.ref.label}. ${v.verses.map((x) => `${x.n}. ${x.text}`).join(' ')}` };
+}

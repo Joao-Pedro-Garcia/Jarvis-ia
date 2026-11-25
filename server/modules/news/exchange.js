@@ -2,6 +2,7 @@
 // reserva na PTAX do Banco Central (API Olinda/BCB). Nunca inventa valores.
 import { fetchWithTimeout, cached } from '../../core/http-client.js';
 import { log } from '../../core/logger.js';
+import { setHealth } from '../../core/health.js';
 
 const CURRENCIES = { USD: { name: 'Dólar', flag: '🇺🇸' }, EUR: { name: 'Euro', flag: '🇪🇺' }, GBP: { name: 'Libra', flag: '🇬🇧' } };
 const TTL = 60 * 1000; // 1 minuto: câmbio é muito sensível ao tempo
@@ -50,11 +51,13 @@ export async function getExchange() {
       const res = await fetchWithTimeout('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,GBP-BRL', { timeout: 8000 });
       const rates = parseAwesome(await res.json());
       if (rates.length !== 3) throw new Error('resposta incompleta');
+      setHealth('cambio', 'ok', `AwesomeAPI · ${new Date().toLocaleTimeString('pt-BR')}`);
       return { ok: true, rates, fetchedAt: new Date().toISOString() };
     } catch (err) {
       log.warn('noticias', `AwesomeAPI falhou (${err.message}); usando PTAX do Banco Central`);
       const results = await Promise.allSettled(Object.keys(CURRENCIES).map(ptax));
       const rates = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+      setHealth('cambio', rates.length ? 'limited' : 'fail', rates.length ? 'AwesomeAPI fora; usando PTAX do Banco Central' : 'Nenhuma fonte de câmbio respondeu');
       if (!rates.length) return { ok: false, rates: [], error: 'Não consegui confirmar a cotação atual neste momento.', fetchedAt: new Date().toISOString() };
       return { ok: true, rates, fetchedAt: new Date().toISOString(), note: 'Cotação comercial indisponível; exibindo PTAX do Banco Central.' };
     }

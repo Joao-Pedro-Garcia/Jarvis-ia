@@ -20,6 +20,9 @@ const memory = await import('./modules/memory/memory.js');
 const news = await import('./modules/news/news.js');
 const house = await import('./modules/house/house.js');
 const llm = await import('./brain/llm.js');
+const tasks = await import('./modules/tasks/tasks.js');
+const selftest = await import('./core/selftest.js');
+await (await import('./commands/loader.js')).loadCustomCommands();
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -41,6 +44,11 @@ function send(res, status, body, headers = {}) {
 }
 
 async function readBody(req, limit = 64 * 1024) {
+  // Só JSON: impede que formulários/requests "simples" de outros sites (CSRF) sejam aceitos.
+  const type = String(req.headers['content-type'] || '');
+  if (req.headers['content-length'] !== '0' && type && !type.startsWith('application/json')) {
+    throw Object.assign(new Error('Content-Type deve ser application/json'), { status: 415 });
+  }
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Corpo muito grande'), { status: 413 })); req.destroy(); } else chunks.push(c); });
@@ -54,12 +62,26 @@ async function readBody(req, limit = 64 * 1024) {
 
 // Limite simples de requisições por IP (evita abuso e gastos com a API).
 const hits = new Map();
+setInterval(() => { // limpeza periódica (evita crescimento infinito do mapa)
+  const now = Date.now();
+  for (const [k, arr] of hits) if (!arr.length || now - arr[arr.length - 1] > 120000) hits.delete(k);
+}, 60000).unref();
 function rateLimited(ip, key, max, windowMs = 60000) {
   const k = `${ip}|${key}`;
   const now = Date.now();
   const arr = (hits.get(k) || []).filter((t) => now - t < windowMs);
   arr.push(now); hits.set(k, arr);
   return arr.length > max;
+}
+
+/**
+ * Bloqueia requisições de outros sites (CSRF). Navegadores enviam Origin em
+ * requisições cross-site; se existir, precisa ser o próprio host do JARVIS.
+ */
+export function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // apps/curl/mesma origem em GET
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
 }
 
 function authorized(req, url) {
@@ -99,7 +121,11 @@ async function api(req, res, url) {
   const pageSize = Number(url.searchParams.get('pageSize')) || 8;
 
   if (route === 'GET /api/health') return send(res, 200, { ok: true, at: new Date().toISOString() });
-  if (!authorized(req, url)) return send(res, 401, { error: 'Token de acesso inválido' });
+  if (req.method !== 'GET' && !sameOrigin(req)) {
+    log.warn('seguranca', `Requisição de outra origem bloqueada (${req.method} ${url.pathname})`);
+    return send(res, 403, { error: 'Origem não permitida' });
+  }
+  if (!authorized(req, url)) { log.warn('seguranca', 'Token de acesso inválido'); return send(res, 401, { error: 'Token de acesso inválido' }); }
 
   switch (route) {
     case 'GET /api/status': {
@@ -109,7 +135,8 @@ async function api(req, res, url) {
     case 'POST /api/input': {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       const body = await readBody(req);
-      const out = await processInput(body.text, { sessionId: String(body.sessionId || 'default').slice(0, 64), pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text' });
+      const client = body.client && typeof body.client === 'object' ? { mic: String(body.client.mic || '').slice(0, 20), hearing: body.client.hearing !== false, voice: body.client.voice !== false, notifications: String(body.client.notifications || '').slice(0, 20) } : {};
+      const out = await processInput(body.text, { sessionId: String(body.sessionId || 'default').slice(0, 64), pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client });
       return send(res, 200, out);
     }
     case 'GET /api/events': {
@@ -161,6 +188,18 @@ async function api(req, res, url) {
     case 'GET /api/personality': return send(res, 200, getPersonality());
     case 'PUT /api/personality': return send(res, 200, updatePersonality(await readBody(req)));
 
+    // ---- Tarefas ----
+    case 'GET /api/tasks': return send(res, 200, { tasks: tasks.list({ includeDone: url.searchParams.get('all') === '1' }) });
+    case 'POST /api/tasks': {
+      const body = await readBody(req);
+      if (!String(body.text || '').trim()) return send(res, 400, { error: 'Texto obrigatório' });
+      return send(res, 201, tasks.add(String(body.text).trim(), body.dueAt ? { dueAt: body.dueAt, hasTime: !!body.hasTime } : {}));
+    }
+    case 'GET /api/selftest': {
+      if (rateLimited(ip, 'selftest', 6)) return send(res, 429, { error: 'Aguarde antes de repetir o diagnóstico.' });
+      return send(res, 200, await selftest.runSelfTest({ includeAI: url.searchParams.get('ai') !== '0' }));
+    }
+
     // ---- Casa ----
     case 'GET /api/house': return send(res, 200, await house.status());
 
@@ -183,6 +222,21 @@ async function api(req, res, url) {
   if ((m = url.pathname.match(/^\/api\/memory\/([\w-]{36})$/))) {
     if (req.method === 'PATCH') { const item = memory.updateItem(m[1], await readBody(req)); return item ? send(res, 200, item) : send(res, 404, { error: 'Não encontrada' }); }
     if (req.method === 'DELETE') { const item = memory.remove(m[1]); return item ? send(res, 200, item) : send(res, 404, { error: 'Não encontrada' }); }
+  }
+  if ((m = url.pathname.match(/^\/api\/memory\/([\w-]{36})\/reveal$/)) && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body.confirm !== true) return send(res, 400, { error: 'Confirmação necessária' });
+    log.info('seguranca', 'Memória protegida revelada (após confirmação)');
+    const text = memory.reveal(m[1]);
+    return text ? send(res, 200, { text }) : send(res, 404, { error: 'Não encontrada' });
+  }
+  if ((m = url.pathname.match(/^\/api\/tasks\/([\w-]{36})$/)) && req.method === 'PATCH') {
+    const body = await readBody(req);
+    const id = m[1];
+    if (!tasks.get(id)) return send(res, 404, { error: 'Não encontrada' });
+    const out = body.action === 'done' ? tasks.complete(id) : body.action === 'cancel' ? tasks.cancel(id) : body.action === 'reopen' ? memory.updateItem(id, { status: 'pending' })
+      : body.action === 'postpone' && body.dueAt ? tasks.postpone(id, new Date(body.dueAt), !!body.hasTime) : body.action === 'edit' && body.text ? tasks.edit(id, String(body.text)) : null;
+    return out ? send(res, 200, out) : send(res, 400, { error: 'Ação inválida' });
   }
   return send(res, 404, { error: 'Rota não encontrada' });
 }
@@ -210,6 +264,7 @@ export function createServer() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'server', 'index.js')) {
   const { server, protocol } = createServer();
+  tasks.startScheduler();
   server.listen(PORT, HOST, () => {
     bus.emitEvent(EVENTS.ASSISTANT_STARTED, {});
     log.info('sistema', `JARVIS online em ${protocol}://${HOST}:${PORT} · IA: ${llm.available() ? llm.model() : 'não configurada (modo local)'}`);

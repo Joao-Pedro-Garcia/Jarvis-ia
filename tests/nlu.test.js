@@ -30,8 +30,8 @@ const CASES = {
   'memory.remember': ['JARVIS, lembre que eu moro em Palmas.', 'lembre disso', 'memorize que meu carro é um Gol 2014'],
   'memory.forget': ['JARVIS, esqueça isso.', 'esqueça que eu moro em Palmas'],
   'memory.recall': ['JARVIS, o que você lembra sobre isso?', 'o que você sabe sobre mim?'],
-  'memory.task_add': ['adicione uma tarefa trocar o óleo do carro'],
-  'memory.task_list': ['quais são minhas tarefas?'],
+  'task.add': ['adicione uma tarefa trocar o óleo do carro'],
+  'task.list': ['quais são minhas tarefas?'],
   'engineering.math': ['quanto é 15% de 230?', 'raiz quadrada de 144', 'JARVIS, faça uma conta: 2 mais 3 vezes 4'],
   'engineering.convert': ['converter 10 km em milhas', 'quanto é 32 psi em bar?'],
   'engineering.ohm': ['qual a corrente com 12 volts e 4 ohms?'],
@@ -65,10 +65,14 @@ test('conversa normal não vira comando', () => {
 test('detecção de tom', () => {
   assert.equal(detectTone('JARVIS, estou cansado hoje.').mode, 'desabafo');
   assert.equal(detectTone('hoje foi um dia difícil, preciso desabafar').mode, 'desabafo');
-  assert.equal(detectTone('kkkkk conta uma piada').mode, 'brincadeira');
+  assert.equal(detectTone('kkkkk conta uma piada').mode, 'resenha');
   assert.equal(detectTone('me explica o que é derivada, tenho prova amanhã').mode, 'estudo');
-  assert.equal(detectTone('me ajuda com uma planilha').mode, 'ajuda');
-  assert.equal(detectTone('abra a bíblia', { isCommand: true }).mode, 'ordem');
+  assert.equal(detectTone('me ajuda com uma planilha').mode, 'normal');
+  assert.equal(detectTone('abra a bíblia', { isCommand: true }).mode, 'normal');
+  assert.equal(detectTone('socorro, meu pai está passando mal').mode, 'urgente');
+  assert.equal(detectTone('sinto cheiro de gás na cozinha, é urgente').mode, 'urgente');
+  assert.equal(detectTone('estou preocupado com a prova').mode, 'desabafo');
+  assert.equal(detectTone('me ajuda com esse motor que está superaquecendo').mode, 'tecnico');
   assert.equal(detectDomain('meu carro está falhando quando esquenta o motor'), 'motor');
   assert.equal(detectDomain('calcule a corrente desse circuito'), 'engenharia');
 });

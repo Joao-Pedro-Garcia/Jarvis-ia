@@ -20,6 +20,8 @@ export const EVENTS = Object.freeze({
   API_FAILURE: 'API_FAILURE',
   HOUSE_ACTION: 'HOUSE_ACTION',
   SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+  REMINDER_DUE: 'REMINDER_DUE',
+  TASK_UPDATED: 'TASK_UPDATED',
 });
 
 class Bus extends EventEmitter {

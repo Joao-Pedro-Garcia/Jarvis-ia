@@ -80,3 +80,46 @@ export function wordsToDigits(text) {
     String(NUM_WORDS[tens] + (unit ? NUM_WORDS[unit] : 0)))
     .replace(/\b(zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove)\b/g, (m) => String(NUM_WORDS[m]));
 }
+
+// ---------- Tolerância a erros de transcrição ----------
+// Vocabulário de palavras-chave de comandos. Palavras do usuário a 1 edição de
+// distância (2 para palavras longas) são corrigidas: "notisias" → "noticias".
+const VOCAB = ['biblia', 'noticias', 'noticia', 'gasolina', 'diesel', 'combustivel', 'dolar', 'euro', 'cambio', 'cotacao', 'capitulo', 'pagina',
+  'proxima', 'proximo', 'leitura', 'lembre', 'lembra', 'esqueca', 'tarefa', 'tarefas', 'diagnostico', 'silencioso', 'status', 'ajuda',
+  'configuracoes', 'memoria', 'conversao', 'converter', 'avanca', 'continuar', 'continue', 'lembrete', 'lembretes', 'tocantins'];
+const VOCAB_SET = new Set(VOCAB);
+// Formas válidas do português próximas do vocabulário: nunca "corrigir".
+const KEEP = new Set(['continua', 'continuo', 'continuei', 'continuou', 'continuem', 'lembro', 'lembrou', 'lembrei', 'lembrar', 'lembrem', 'proximas', 'proximos',
+  'avance', 'avancar', 'avancou', 'ajudar', 'ajude', 'ajudou', 'paginas', 'leituras', 'capitulos', 'tarefinha', 'estatus', 'memorias', 'converte', 'converta']);
+
+export function correctWords(text) {
+  return text.split(' ').map((w) => {
+    if (w.length < 5 || VOCAB_SET.has(w) || KEEP.has(w) || /\d/.test(w)) return w;
+    let best = null, bestD = Infinity;
+    for (const v of VOCAB) {
+      if (Math.abs(v.length - w.length) > 2 || v.slice(0, 2) !== w.slice(0, 2)) continue;
+      const d = levenshtein(w, v);
+      if (d < bestD) { bestD = d; best = v; }
+    }
+    const max = w.length >= 9 ? 2 : 1;
+    return best && bestD <= max ? best : w;
+  }).join(' ');
+}
+
+/**
+ * Recupera o trecho ORIGINAL (com acentos e maiúsculas) que corresponde a uma
+ * frase normalizada. Ex.: ("Me lembra de ligar pro Mecânico", "ligar pro mecanico")
+ * → "ligar pro Mecânico".
+ */
+export function recoverOriginal(raw, normPhrase) {
+  const words = String(raw).split(/\s+/).filter(Boolean);
+  const normWords = words.map((w) => normalize(w).replace(/[^\p{L}\p{N}]/gu, ''));
+  const target = normalize(normPhrase).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  if (!target.length) return normPhrase;
+  for (let i = 0; i + target.length <= words.length; i++) {
+    let ok = true;
+    for (let j = 0; j < target.length; j++) if (normWords[i + j] !== target[j]) { ok = false; break; }
+    if (ok) return words.slice(i, i + target.length).join(' ').replace(/[.,!?;:]+$/, '');
+  }
+  return normPhrase;
+}

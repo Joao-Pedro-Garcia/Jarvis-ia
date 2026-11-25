@@ -9,7 +9,7 @@ export function setupTestEnv(name) {
   process.env.JARVIS_DATA_DIR = dir;
   process.env.JARVIS_LOG_CONSOLE = '0';
   process.env.JARVIS_TIMEZONE = 'America/Araguaina';
-  delete process.env.ANTHROPIC_API_KEY;
+  for (const k of ['ANTHROPIC_API_KEY', 'AI_PROVIDER', 'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'JARVIS_ACCESS_TOKEN', 'JARVIS_SECRET_KEY']) delete process.env[k];
   return dir;
 }
 
@@ -24,3 +24,19 @@ export async function writeFixtureBible(dir) {
   fs.mkdirSync(path.join(dir, 'bible'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'bible', 'acf.json'), JSON.stringify(arr));
 }
+
+/** Substitui o fetch global por respostas roteadas por URL (testes de rede). */
+export function mockFetch(routes) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    calls.push(String(url));
+    for (const [pattern, handler] of routes) {
+      if (String(url).includes(pattern)) return handler(url, opts);
+    }
+    throw new TypeError('fetch failed (sem rota simulada)');
+  };
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+export const jsonResponse = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+export const textResponse = (txt, status = 200) => new Response(txt, { status });

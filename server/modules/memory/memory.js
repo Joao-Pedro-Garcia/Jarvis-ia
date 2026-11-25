@@ -8,6 +8,7 @@ import { load, save } from '../../core/store.js';
 import { bus, EVENTS } from '../../core/events.js';
 import { similarity, keywords, normalize } from '../../core/text.js';
 import { log } from '../../core/logger.js';
+import { encrypt, decrypt } from '../../core/secrets.js';
 
 const STORE = 'memory';
 const DEFAULT = { facts: [], preferences: [], tasks: [] };
@@ -34,24 +35,42 @@ const commit = (d, action, item) => {
   log.info('memoria', `Memória ${action}: ${item?.kind ?? ''}`);
 };
 
+/** Versão pública (sem conteúdo protegido). */
+function mask(m) { return m.secret ? { ...m, secret: undefined, text: `🔒 Informação protegida (${m.sensitiveLabel || 'sensível'})`, protected: true } : m; }
+
 export function list(kind) {
   const d = db();
-  if (kind) return d[kind] || [];
-  return d;
+  if (kind) return (d[kind] || []).map(mask);
+  return Object.fromEntries(Object.keys(KINDS).map((k) => [k, d[k].map(mask)]));
 }
+
+/** Revela uma memória protegida (só após confirmação explícita). */
+export function reveal(id) {
+  for (const kind of Object.keys(KINDS)) {
+    const m = db()[kind].find((x) => x.id === id);
+    if (m) return m.secret ? decrypt(m.secret) : m.text;
+  }
+  return null;
+}
+
+/** Acesso bruto para outros módulos do servidor (tarefas). */
+export function raw() { return db(); }
+export function commitRaw(action, item) { commit(db(), action, item); }
 
 export function add(kind, text, extra = {}) {
   if (!KINDS[kind]) throw new Error('Tipo de memória inválido');
   const clean = String(text || '').trim();
   if (!clean) throw new Error('Memória vazia');
   const d = db();
-  const dup = d[kind].find((m) => normalize(m.text) === normalize(clean));
-  if (dup) return dup;
-  const item = { id: crypto.randomUUID(), kind, text: clean.slice(0, 1000), createdAt: new Date().toISOString(), ...extra };
+  const dup = !extra.sensitive && d[kind].find((m) => !m.secret && m.status !== 'cancelled' && normalize(m.text) === normalize(clean));
+  if (dup) return mask(dup);
+  const { sensitive, ...rest } = extra;
+  const item = { id: crypto.randomUUID(), kind, text: clean.slice(0, 1000), createdAt: new Date().toISOString(), ...rest };
+  if (sensitive) { item.secret = encrypt(item.text); item.text = ''; item.sensitiveLabel = sensitive; }
   if (kind === 'tasks') item.done = false;
   d[kind].push(item);
   commit(d, 'adicionada', item);
-  return item;
+  return mask(item);
 }
 
 export function updateItem(id, patch) {
@@ -59,11 +78,19 @@ export function updateItem(id, patch) {
   for (const kind of Object.keys(KINDS)) {
     const item = d[kind].find((m) => m.id === id);
     if (item) {
-      if (typeof patch.text === 'string' && patch.text.trim()) item.text = patch.text.trim().slice(0, 1000);
-      if (typeof patch.done === 'boolean') item.done = patch.done;
+      if (typeof patch.text === 'string' && patch.text.trim()) {
+        if (item.secret) item.secret = encrypt(patch.text.trim().slice(0, 1000)); else item.text = patch.text.trim().slice(0, 1000);
+      }
+      if (typeof patch.done === 'boolean') { item.done = patch.done; if (kind === 'tasks') item.status = patch.done ? 'done' : 'pending'; }
+      if (kind === 'tasks') {
+        if (['pending', 'done', 'cancelled'].includes(patch.status)) { item.status = patch.status; item.done = patch.status === 'done'; }
+        if ('dueAt' in patch) { item.dueAt = patch.dueAt; item.notifiedAt = null; }
+        if ('hasTime' in patch) item.hasTime = !!patch.hasTime;
+        if ('notifiedAt' in patch) item.notifiedAt = patch.notifiedAt;
+      }
       item.updatedAt = new Date().toISOString();
       commit(d, 'editada', item);
-      return item;
+      return mask(item);
     }
   }
   return null;
@@ -73,7 +100,7 @@ export function remove(id) {
   const d = db();
   for (const kind of Object.keys(KINDS)) {
     const i = d[kind].findIndex((m) => m.id === id);
-    if (i >= 0) { const [item] = d[kind].splice(i, 1); commit(d, 'apagada', item); return item; }
+    if (i >= 0) { const [item] = d[kind].splice(i, 1); commit(d, 'apagada', item); return mask(item); }
   }
   return null;
 }
@@ -90,11 +117,13 @@ export function search(query, { limit = 5, kinds = Object.keys(KINDS), min = 0.0
   const out = [];
   for (const kind of kinds) {
     for (const m of d[kind]) {
-      const sim = similarity(query, m.text);
-      const kw = keywords(m.text);
+      if (m.status === 'cancelled') continue;
+      const hay = m.secret ? `${m.sensitiveLabel} ${m.hint || ''}` : m.text;
+      const sim = similarity(query, hay);
+      const kw = keywords(hay);
       const overlap = q.filter((w) => kw.some((k) => k.startsWith(w.slice(0, 5)) || w.startsWith(k.slice(0, 5)))).length;
       const score = sim + overlap * 0.15;
-      if (score >= min) out.push({ ...m, score });
+      if (score >= min) out.push({ ...mask(m), score });
     }
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
@@ -104,9 +133,10 @@ export function search(query, { limit = 5, kinds = Object.keys(KINDS), min = 0.0
 export function contextSnippet(maxItems = 30) {
   const d = db();
   const lines = [];
-  for (const m of d.facts.slice(-maxItems)) lines.push(`- (fato) ${m.text}`);
-  for (const m of d.preferences.slice(-15)) lines.push(`- (preferência) ${m.text}`);
-  for (const m of d.tasks.filter((t) => !t.done).slice(-15)) lines.push(`- (tarefa pendente) ${m.text}`);
+  // Memórias protegidas NUNCA vão para a IA.
+  for (const m of d.facts.filter((x) => !x.secret).slice(-maxItems)) lines.push(`- (fato) ${m.text}`);
+  for (const m of d.preferences.filter((x) => !x.secret).slice(-15)) lines.push(`- (preferência) ${m.text}`);
+  for (const m of d.tasks.filter((t) => !t.done && t.status !== 'cancelled').slice(-15)) lines.push(`- (tarefa pendente) ${m.text}`);
   return lines.join('\n');
 }
 

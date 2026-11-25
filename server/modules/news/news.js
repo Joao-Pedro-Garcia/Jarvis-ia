@@ -177,13 +177,18 @@ export function exchangeText(ex, only) {
 }
 
 export function fuelText(f, which) {
-  if (!f?.ok) return { text: 'Não consegui obter os preços de combustíveis da ANP agora.', speech: 'Não consegui obter os preços de combustíveis da ANP agora.' };
+  if (!f?.ok) {
+    const lk = f?.lastKnown;
+    const last = lk ? ` A última pesquisa que obtive é de ${lk.period.from.split('-').reverse().join('/')} a ${lk.period.to.split('-').reverse().join('/')} (consultada em ${formatDateTime(new Date(lk.savedAt))}) — pode não refletir os preços atuais.` : '';
+    return { text: `Não consegui confirmar os preços atuais.${last}`, speech: `Não consegui confirmar os preços atuais dos combustíveis.${lk ? ' Mostrei na tela a última pesquisa que obtive, com a data.' : ''}` };
+  }
   const filt = (arr) => arr.filter((p) => !which || (which === 'gasolina' ? /Gasolina/.test(p.product) : /Diesel/.test(p.product)));
   const line = (p) => `${p.product}: R$ ${brl(p.average)}/L`;
   const period = `${f.period.from.split('-').reverse().join('/')} a ${f.period.to.split('-').reverse().join('/')}`;
   const text = `Tocantins\n${filt(f.state.prices).map(line).join('\n')}\n\nBrasil\n${filt(f.brazil.prices).map(line).join('\n')}\n\n${f.method}. Semana ${period}. Fonte: ${f.source}.`;
   const sp = (arr) => filt(arr).map((p) => `${p.product.toLowerCase()} a ${spokenMoney(p.average)}`).join(', ');
-  return { text, speech: `No Tocantins, preço médio de ${sp(f.state.prices)}. Na média nacional, ${sp(f.brazil.prices)}. Pesquisa da ANP da semana de ${period}.` };
+  const warn = f.outdated ? ` Atenção: a pesquisa mais recente disponível termina em ${f.period.to.split('-').reverse().join('/')}.` : '';
+  return { text: `${text}${warn}`, speech: `No Tocantins, preço médio de ${sp(f.state.prices)}. Na média nacional, ${sp(f.brazil.prices)}. Pesquisa da ANP de ${period}.${warn}` };
 }
 
 export function storiesSpeech(st) {
