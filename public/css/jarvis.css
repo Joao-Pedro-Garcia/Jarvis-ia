@@ -368,3 +368,9 @@ body.no-anim .sys-badge.active { animation: none; }
 .stop-speech { align-self: center; margin: 6px auto; min-height: 44px; padding: 10px 22px; border-radius: 999px; border: 1px solid rgba(255,77,109,.6); background: rgba(255,77,109,.12); color: #ffd0d8; font: 600 13px var(--mono); letter-spacing: .14em; cursor: pointer; }
 .stop-speech:hover, .stop-speech:focus-visible { background: rgba(255,77,109,.25); outline: 2px solid rgba(255,77,109,.7); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .sys-badge.active { animation: none; } }
+
+/* ---------- modo dormindo: tela escura, só escuta palmas e "Jarvis" ---------- */
+body.asleep .layout, body.asleep .dock { opacity: .12; transition: opacity .8s ease; }
+body.asleep .core-wrap { opacity: .85; transition: opacity .8s ease; }
+body:not(.asleep) .layout, body:not(.asleep) .dock { transition: opacity .8s ease; }
+@media (prefers-reduced-motion: reduce) { body.asleep .layout, body.asleep .dock, body.asleep .core-wrap { transition: none; } }

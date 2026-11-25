@@ -88,10 +88,42 @@ function clientInfo() {
   return { mic: micStatus(), hearing: hearingSupported, voice: voiceSupported, notifications: notificationState() };
 }
 
+// ============================================================ modo dormindo
+// Dormindo: tela apagada, só escuta duas palmas ou a palavra "Jarvis". Acorda com qualquer uma.
+let asleep = false;
+const SLEEP_RE = /^(jarvis )?(dorme|durma|modo dormir|pode dormir|descansa|descanse|modo sono|modo descanso)( jarvis)?$/;
+function sleepNow() {
+  if (asleep) return;
+  asleep = true;
+  stopAll();
+  document.body.classList.add('asleep');
+  setState('standby', 'DORMINDO');
+  addMsg('system', '💤 Modo dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.', 'SISTEMA');
+  // os detectores de ativação precisam estar ligados para acordar
+  const s = getSettings();
+  if (!s.clap.enabled || !s.hearing.wakeWord) {
+    saveSettings({ clap: { enabled: true }, hearing: { wakeWord: true } }).then((n) => {
+      applySettings(n, 'clap.enabled');
+      wake?.setWakeWord(true, n);
+    }).catch(() => {});
+  }
+}
+function wakeUp(how) {
+  if (!asleep) return false;
+  asleep = false;
+  document.body.classList.remove('asleep');
+  setState('standby');
+  addMsg('system', `🔔 Acordei (${how}).`, 'SISTEMA');
+  return true;
+}
+
 async function handleInput(text, source = 'text') {
   text = String(text || '').trim();
   if (!text) { setState('standby'); return; }
   if (busy) { toast('Aguarde, ainda estou processando…'); return; }
+  const low = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (SLEEP_RE.test(low)) { if (!asleep) sleepNow(); else addMsg('system', 'Já estou dormindo. Bata duas palmas ou diga “Jarvis”.', 'SISTEMA'); return; }
+  if (asleep) { wakeUp('comando de voz'); }
   busy = true;
   stopAll();
   addMsg('user', text);
@@ -224,6 +256,7 @@ bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 // PALMS_DETECTED: duas palmas reconhecidas → "Sim?" → ouvir → cérebro → resposta.
 bus.on(EVENTS.PALMS_DETECTED, (evt) => {
   if (evt?.test) return; // teste do diagnóstico: não inicia conversa
+  if (asleep) { wakeUp('duas palmas'); startListening({ chime: false, greet: 'Sim?' }); return; }
   if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
@@ -231,6 +264,8 @@ bus.on(EVENTS.PALMS_DETECTED, (evt) => {
 });
 bus.on(EVENTS.VOICE_RECEIVED, ({ text, wake: isWake }) => {
   if (!isWake) return;
+  const woke = wakeUp('Jarvis');
+  if (woke && !(text && text.length > 1)) { startListening({ chime: false, greet: 'Sim?' }); return; }
   if (text && text.length > 1) handleInput(text, 'voice'); else startListening({ chime: false, greet: 'Sim?' });
 });
 bus.on('bible:message', (msg) => { addMsg('jarvis', msg, { tag: 'BÍBLIA' }); if (/concluíd/.test(msg)) say(msg); });
@@ -345,7 +380,10 @@ $('#command-form').addEventListener('submit', (e) => {
   handleInput(v, 'text');
 });
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
-$('#core-button').addEventListener('click', () => (isSpeaking() || isPaused() ? stopAll() : startListening()));
+$('#core-button').addEventListener('click', () => {
+  if (asleep) { wakeUp('toque'); startListening({ chime: false, greet: 'Sim?' }); return; }
+  return isSpeaking() || isPaused() ? stopAll() : startListening();
+});
 $('#stop-btn').addEventListener('click', stopAll);
 $('#stop-speech').addEventListener('click', () => { stopAll(); updateTopStatus(); });
 $('#pause-btn').addEventListener('click', togglePause);
