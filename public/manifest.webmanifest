@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "JARVIS — Assistente Pessoal",
+  "short_name": "JARVIS",
+  "description": "Assistente pessoal com voz, palmas, Bíblia, notícias, tarefas e memória.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#03070d",
+  "theme_color": "#03070d",
+  "lang": "pt-BR",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Bíblia", "short_name": "Bíblia", "url": "/?cmd=biblia", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Notícias", "short_name": "Notícias", "url": "/?cmd=noticias", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Meu dia", "short_name": "Meu dia", "url": "/?cmd=meu-dia", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

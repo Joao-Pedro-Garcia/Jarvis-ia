@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#03070d">
+  <meta name="description" content="JARVIS — assistente pessoal inteligente">
+  <title>JARVIS</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="/css/jarvis.css">
+</head>
+<body data-state="standby">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-vignette" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" /><circle cx="20" cy="20" r="9" /><path d="M20 3v6M20 31v6M3 20h6M31 20h6" /></svg>
+      <div>
+        <h1>J.A.R.V.I.S</h1>
+        <span class="brand-sub">Sistema pessoal de inteligência</span>
+      </div>
+    </div>
+    <div class="chips" id="chips">
+      <span class="chip" id="chip-net" title="Conexão"><i></i><b>REDE</b></span>
+      <span class="chip" id="chip-ai" title="Cérebro / IA"><i></i><b>IA</b></span>
+      <span class="chip" id="chip-mic" title="Microfone"><i></i><b>MIC</b></span>
+      <span class="chip" id="chip-clap" title="Palmas"><i></i><b>PALMAS</b></span>
+      <span class="chip chip-silent" title="Modo silencioso">🔇<b>SILENCIOSO</b></span>
+    </div>
+    <div class="clock">
+      <time id="clock-time">--:--</time>
+      <span id="clock-date">—</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- COLUNA ESQUERDA -->
+    <aside class="side side-left">
+      <section class="panel glass">
+        <header class="panel-h"><span>MÓDULOS</span><button class="icon-btn" data-open="modules" title="Detalhes dos módulos">⋯</button></header>
+        <ul class="module-grid" id="module-grid"></ul>
+      </section>
+      <section class="panel glass grow">
+        <header class="panel-h"><span>COMANDOS RECENTES</span></header>
+        <ol class="recent" id="recent-commands"><li class="muted">Nenhum comando ainda.</li></ol>
+      </section>
+    </aside>
+
+    <!-- CENTRO: NÚCLEO -->
+    <section class="center">
+      <div class="core-wrap" id="core-wrap">
+        <canvas id="core-canvas" aria-hidden="true"></canvas>
+        <button class="core-button" id="core-button" aria-label="Falar com o JARVIS">
+          <span class="core-state" id="core-state">ONLINE</span>
+          <span class="core-sub" id="core-sub">EM ESPERA</span>
+        </button>
+      </div>
+      <div class="interim" id="interim" aria-live="polite"></div>
+      <div class="transcript glass" id="transcript" aria-live="polite"></div>
+      <form class="command-bar glass" id="command-form" autocomplete="off">
+        <button type="button" class="mic-btn" id="mic-btn" aria-label="Ativar microfone (espaço)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <input id="command-input" type="text" placeholder="Fale ou digite um comando…  ( / para digitar · espaço para falar )" aria-label="Comando" maxlength="2000">
+        <span class="speech-controls"><button type="button" class="icon-btn" id="pause-btn" title="Pausar/continuar fala (P)" aria-label="Pausar ou continuar a fala">❚❚</button><button type="button" class="icon-btn" id="stop-btn" title="Parar fala (Esc)" aria-label="Parar fala">■</button></span>
+        <button type="submit" class="send-btn" aria-label="Enviar">➤</button>
+      </form>
+      <nav class="quick" aria-label="Atalhos">
+        <button data-say="Bíblia">📖 Bíblia</button>
+        <button data-say="Notícias">📰 Notícias</button>
+        <button data-say="Como está o dólar?">💰 Câmbio</button>
+        <button data-say="Que horas são?">⏱ Hora</button>
+        <button data-open="memory">🧠 Memória</button>
+      </nav>
+    </section>
+
+    <!-- COLUNA DIREITA -->
+    <aside class="side side-right">
+      <section class="panel glass">
+        <header class="panel-h"><span>SISTEMA</span><button class="icon-btn" data-open="diagnostics" title="Diagnóstico">⚙</button></header>
+        <dl class="sysinfo" id="sysinfo">
+          <div><dt>Estado</dt><dd id="sys-state">EM ESPERA</dd></div>
+          <div><dt>Resposta</dt><dd id="sys-latency">—</dd></div>
+          <div><dt>Tom</dt><dd id="sys-tone">—</dd></div>
+          <div><dt>Sessão</dt><dd id="sys-uptime">0 min</dd></div>
+          <div><dt>Modo</dt><dd id="sys-mode">—</dd></div>
+        </dl>
+        <div class="meter"><span>Nível do microfone</span><div class="meter-bar"><i id="mic-level"></i><b id="clap-threshold"></b></div></div>
+      </section>
+      <section class="panel glass">
+        <header class="panel-h"><span>LEITURA DE HOJE</span><button class="icon-btn" data-say="Bíblia" title="Abrir leitura">›</button></header>
+        <div id="bible-mini" class="bible-mini"><p class="muted">Diga “Bíblia” para começar.</p></div>
+      </section>
+      <section class="panel glass grow">
+        <header class="panel-h"><span>MEMÓRIA</span><button class="icon-btn" data-open="memory" title="Abrir memória">›</button></header>
+        <ul class="mem-mini" id="mem-mini"><li class="muted">Sem memórias.</li></ul>
+      </section>
+    </aside>
+  </main>
+
+  <!-- Barra inferior (celular) -->
+  <nav class="dock" aria-label="Navegação">
+    <button data-say="Bíblia"><span>📖</span>Bíblia</button>
+    <button data-say="Notícias"><span>📰</span>Notícias</button>
+    <button class="dock-mic" id="dock-mic" aria-label="Falar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+    <button data-open="memory"><span>🧠</span>Memória</button>
+    <button data-open="menu"><span>☰</span>Mais</button>
+  </nav>
+
+  <!-- Painéis sobrepostos -->
+  <div class="overlay" id="overlay" hidden>
+    <section class="sheet glass" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <header class="sheet-h">
+        <h2 id="sheet-title">—</h2>
+        <div class="sheet-actions">
+          <button class="icon-btn sheet-mic" id="sheet-mic" aria-label="Falar com o JARVIS (espaço)" title="Falar (espaço)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+          <button class="icon-btn" id="sheet-close" aria-label="Fechar (Esc)">✕</button>
+        </div>
+      </header>
+      <div class="sheet-body" id="sheet-body"></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div class="banner" id="banner" role="status" hidden></div>
+  <div class="update-bar" id="update-bar" hidden><span>Nova versão do JARVIS disponível.</span><button class="btn small" id="update-btn">Atualizar</button></div>
+
+  <div class="boot" id="boot">
+    <div class="boot-ring"></div>
+    <p id="boot-text">INICIALIZANDO SISTEMAS…</p>
+    <ul class="boot-log" id="boot-log"></ul>
+    <button id="boot-start" class="boot-start" hidden>TOQUE PARA INICIAR</button>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
