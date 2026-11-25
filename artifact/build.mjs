@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const R = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+const strip = (f) => fs.readFileSync(`${R}/${f}`, 'utf8').replace(/^import .*$/gm, '').replace(/^export \* from .*$/gm, '').replace(/^export /gm, '');
+const shared = ['shared/math.js', 'shared/units.js', 'shared/physics.js'].map(strip).join('\n');
+const { BOOKS } = await import(`${R}/server/modules/bible/books.js`);
+const books = JSON.stringify(BOOKS.map((b) => [b.abbrev, b.name, b.chapters]));
+let html = fs.readFileSync(new URL('./template.html', import.meta.url), 'utf8');
+html = html.replace('/*__SHARED__*/', () => shared).replace('/*__BOOKS__*/', () => books);
+fs.writeFileSync(new URL('./index.html', import.meta.url), html);
+console.log('ok', html.length);

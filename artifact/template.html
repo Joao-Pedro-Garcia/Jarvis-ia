@@ -1,0 +1,489 @@
+<title>JARVIS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: central de inteligência — cabeçalho de estado, núcleo, conversa, barra de comando e atalhos; painéis deslizam por baixo. Tema escuro único (identidade do JARVIS). */
+:root{
+  --bg:#03070d; --panel:#081420; --panel-2:#0b1b2a; --line:#15334a; --line-strong:#1f5576;
+  --fg:#d9ecf7; --muted:#7d97ab; --cyan:#5ef2ff; --cyan-rgb:94,242,255;
+  --ok:#3dffa8; --warn:#ffb547; --bad:#ff4d6d;
+  --display:"Orbitron","Space Grotesk",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:radial-gradient(ellipse at 50% -10%,#0b2233 0%,var(--bg) 60%) fixed,var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px 16px}
+.app{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:12px;min-height:100%}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{margin:0;font-family:var(--display);font-weight:700;letter-spacing:.32em;font-size:clamp(18px,4.5vw,24px);color:var(--cyan)}
+.brand small{display:block;font:10px var(--mono);letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.badge{font:600 10px var(--mono);letter-spacing:.16em;padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong);color:var(--muted);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:rgba(61,255,168,.5)}
+.badge.active{color:var(--cyan);border-color:var(--cyan);box-shadow:0 0 12px rgba(var(--cyan-rgb),.35);animation:pulse 1.2s ease-in-out infinite}
+.badge.warn{color:var(--warn);border-color:rgba(255,181,71,.55)}
+.badge.bad{color:var(--bad);border-color:rgba(255,77,109,.55)}
+@keyframes pulse{50%{opacity:.55}}
+.clock{font:600 13px var(--mono);color:var(--cyan);letter-spacing:.1em}
+
+.core{position:relative;width:min(190px,48vw);aspect-ratio:1;margin:2px auto 0;max-width:100%}
+.ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(var(--cyan-rgb),.18)}
+.ring.r2{inset:10%;border-style:dashed;border-color:rgba(var(--cyan-rgb),.3);animation:spin 26s linear infinite}
+.ring.r3{inset:22%;border-color:rgba(var(--cyan-rgb),.55);box-shadow:0 0 30px rgba(var(--cyan-rgb),.18),inset 0 0 30px rgba(var(--cyan-rgb),.12)}
+.ring.r1{border-top-color:var(--cyan);animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.core-btn{position:absolute;inset:22%;border-radius:50%;border:0;background:transparent;color:var(--fg);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.core-btn b{font-family:var(--display);letter-spacing:.24em;font-size:clamp(12px,3vw,15px);color:var(--cyan)}
+.core-btn span{font:10px var(--mono);letter-spacing:.2em;color:var(--muted)}
+body[data-state="thinking"] .ring.r1{animation-duration:1.4s}
+body[data-state="speaking"] .ring.r3{animation:glow .7s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 0 50px rgba(var(--cyan-rgb),.45),inset 0 0 40px rgba(var(--cyan-rgb),.25)}}
+
+.transcript{background:rgba(8,20,32,.78);border:1px solid var(--line);border-radius:16px;padding:12px 14px;min-height:180px;max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.msg{margin:0;max-width:92%;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg .who{display:block;font:600 10px var(--mono);letter-spacing:.18em;color:var(--muted);margin-bottom:2px}
+.msg.user{align-self:flex-end;background:rgba(var(--cyan-rgb),.08);border:1px solid rgba(var(--cyan-rgb),.25);border-radius:12px 12px 2px 12px;padding:8px 12px}
+.msg.jarvis{align-self:flex-start}
+.msg.jarvis .who{color:var(--cyan)}
+.msg.system{align-self:center;font:12px var(--mono);color:var(--warn);text-align:center}
+.tag{display:inline-block;margin-left:6px;font:600 9px var(--mono);letter-spacing:.14em;color:var(--muted);border:1px solid var(--line-strong);border-radius:999px;padding:1px 7px;vertical-align:middle}
+.thinking{color:var(--muted);font-style:italic}
+
+.bar{display:flex;gap:8px;align-items:center;background:rgba(8,20,32,.9);border:1px solid var(--line-strong);border-radius:999px;padding:6px}
+.bar input{flex:1;min-width:0;background:transparent;border:0;color:var(--fg);font:15px var(--body);padding:10px 12px;outline:none}
+.round{width:44px;height:44px;flex:none;border-radius:50%;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--cyan);font-size:18px;cursor:pointer}
+.round:disabled{opacity:.4;cursor:default}
+.stop{display:block;margin:0 auto;min-height:44px;padding:8px 22px;border-radius:999px;border:1px solid rgba(255,77,109,.6);background:rgba(255,77,109,.12);color:#ffd0d8;font:600 12px var(--mono);letter-spacing:.14em;cursor:pointer}
+.quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.quick button{min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:500 13px var(--body);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px}
+.quick button span{font-size:17px}
+.quick button:hover,.round:hover{border-color:var(--cyan)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+@media (max-width:520px){.quick{grid-template-columns:repeat(4,minmax(0,1fr))}.quick button{font-size:11px}}
+.foot{font:11px var(--mono);color:var(--muted);text-align:center}
+
+.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(2,6,10,.7);display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:min(860px,100%);max-height:86vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line-strong);border-bottom:0;border-radius:18px 18px 0 0;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.sheet h2{margin:0;font-family:var(--display);font-size:14px;letter-spacing:.26em;color:var(--cyan)}
+.sheet-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.row > div{min-width:0}
+.row small{display:block;color:var(--muted);font-size:12px}
+.st{font:600 11px var(--mono);letter-spacing:.1em;white-space:nowrap}
+.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.bad{color:var(--bad)}.st.muted{color:var(--muted)}
+.btn{min-height:40px;padding:8px 14px;border-radius:10px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--fg);font:500 13px var(--body);cursor:pointer}
+.btn.primary{border-color:var(--cyan);color:var(--cyan)}
+.btn.danger{border-color:rgba(255,77,109,.6);color:#ffd0d8}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chip{font:600 11px var(--mono);padding:5px 10px;border-radius:999px;border:1px solid var(--line-strong);color:var(--muted)}
+.chip.done{color:var(--ok);border-color:rgba(61,255,168,.5)}
+.muted{color:var(--muted)}
+.hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+.inline{display:flex;gap:8px;margin-top:10px}
+.inline input{flex:1;min-width:0;background:var(--panel-2);border:1px solid var(--line-strong);border-radius:10px;color:var(--fg);padding:9px 12px;font:14px var(--body)}
+@media (prefers-reduced-motion:reduce){.ring,.badge.active,body[data-state] .ring{animation:none!important}}
+</style>
+
+<div class="app" id="app">
+  <header>
+    <div class="brand">
+      <div>
+        <h1>J.A.R.V.I.S</h1>
+        <small>Sistema pessoal de inteligência</small>
+      </div>
+      <span class="badge" id="badge" role="status" aria-live="polite">INICIANDO</span>
+    </div>
+    <time class="clock" id="clock">--:--</time>
+  </header>
+
+  <div class="core" aria-hidden="false">
+    <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+    <button class="core-btn" id="core" type="button" aria-label="Escrever para o JARVIS"><b id="core-state">ONLINE</b><span id="core-sub">EM ESPERA</span></button>
+  </div>
+
+  <div class="transcript" id="transcript" aria-live="polite"></div>
+  <button class="stop" id="stop" type="button" hidden>■ PARAR</button>
+
+  <form class="bar" id="form" autocomplete="off">
+    <input id="input" type="text" maxlength="2000" placeholder="Fale com o JARVIS… (ex.: estou cansado hoje)" aria-label="Mensagem para o JARVIS">
+    <button class="round" id="voice-toggle" type="button" title="Respostas em voz" aria-label="Ligar ou desligar a voz">🔊</button>
+    <button class="round" id="send" type="submit" aria-label="Enviar">➤</button>
+  </form>
+
+  <nav class="quick" aria-label="Atalhos">
+    <button type="button" data-say="Bíblia"><span>📖</span>Bíblia</button>
+    <button type="button" data-say="Meu dia"><span>🗓</span>Meu dia</button>
+    <button type="button" data-open="tasks"><span>✅</span>Tarefas</button>
+    <button type="button" data-open="memory"><span>🧠</span>Memória</button>
+    <button type="button" data-say="Me ajude a calcular"><span>🧮</span>Calcular</button>
+    <button type="button" data-say="Notícias"><span>📰</span>Notícias</button>
+    <button type="button" data-say="Me conta uma curiosidade de ciência"><span>💡</span>Curiosidade</button>
+    <button type="button" data-open="diag"><span>🩺</span>Diagnóstico</button>
+  </nav>
+  <p class="foot" id="foot">Conversa por IA (Claude, na sua conta) · memória, tarefas e Bíblia salvas na sua conta · cálculos locais</p>
+</div>
+
+<div class="sheet-wrap" id="sheet-wrap" hidden>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-h"><h2 id="sheet-title">—</h2><button class="round" id="sheet-close" type="button" aria-label="Fechar">✕</button></div>
+    <div id="sheet-body"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+'use strict';
+// ====================================================================== código compartilhado do JARVIS (cálculos)
+/*__SHARED__*/
+const BOOKS = /*__BOOKS__*/;
+
+// ====================================================================== utilidades
+const $ = (s) => document.querySelector(s);
+const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/^(ei |ok |oi )?jarvis[,!.\s]*/, '').replace(/[?!.]+$/, '').replace(/\s+/g, ' ').trim();
+const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const bookOf = (ab) => BOOKS.find((b) => b[0] === ab);
+const refLabel = (r) => `${bookOf(r.book)[1]} ${r.chapter}`;
+function nextRef(r) { const i = BOOKS.findIndex((b) => b[0] === r.book); if (r.chapter < BOOKS[i][2]) return { book: r.book, chapter: r.chapter + 1 }; return BOOKS[i + 1] ? { book: BOOKS[i + 1][0], chapter: 1 } : { book: 'gn', chapter: 1 }; }
+function rangeLabel(chs) { const a = chs[0], b = chs[chs.length - 1]; return a.book === b.book ? `${bookOf(a.book)[1]} ${a.chapter}${chs.length > 1 ? `–${b.chapter}` : ''}` : `${refLabel(a)} – ${refLabel(b)}`; }
+
+// ====================================================================== estado (salvo na conta)
+const DEFAULT = { v: 1, memories: [], tasks: [], bible: { position: { book: 'gn', chapter: 2 }, perDay: 3, plan: null, streak: 0, lastDone: null }, voice: true };
+let state = JSON.parse(JSON.stringify(DEFAULT));
+const store = { kind: 'local', ref: null, timer: null, writing: Promise.resolve(), dirty: false };
+function persist() {
+  store.dirty = true;
+  clearTimeout(store.timer);
+  store.timer = setTimeout(() => {
+    const snapshot = JSON.parse(JSON.stringify(state));
+    try { localStorage.setItem('jarvis.state', JSON.stringify(snapshot)); } catch (e) {}
+    if (store.ref) store.writing = store.writing.then(() => store.ref.set(snapshot)).catch((e) => { store.error = e.code || 'erro'; renderBadge(); });
+    store.dirty = false;
+  }, 400);
+}
+function adopt(data) {
+  if (!data || typeof data !== 'object') return;
+  state = { ...JSON.parse(JSON.stringify(DEFAULT)), ...data, bible: { ...DEFAULT.bible, ...(data.bible || {}) } };
+}
+try { adopt(JSON.parse(localStorage.getItem('jarvis.state') || 'null')); } catch (e) {}
+
+// ====================================================================== capacidades
+let sample = null, tts = null, aiReady = 'checking', aiTools = false, ttsState = 'idle';
+let busy = false, ctl = null;
+const turns = []; // conversa (a página guarda; a IA não lembra sozinha)
+
+// ====================================================================== interface
+const T = $('#transcript');
+function addMsg(role, text, tag) {
+  const p = document.createElement('p');
+  p.className = `msg ${role}`;
+  if (role !== 'system') { const w = document.createElement('span'); w.className = 'who'; w.textContent = role === 'user' ? 'VOCÊ' : 'JARVIS'; if (tag) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = tag; w.appendChild(t); } p.appendChild(w); }
+  const body = document.createElement('span'); body.className = 'body'; body.textContent = text; p.appendChild(body);
+  T.appendChild(p);
+  while (T.children.length > 80) T.firstChild.remove();
+  T.scrollTop = T.scrollHeight;
+  return body;
+}
+let uiState = 'standby';
+function setState(s, sub) {
+  uiState = s; document.body.dataset.state = s;
+  $('#core-state').textContent = { standby: 'ONLINE', thinking: 'PROCESSANDO', speaking: 'FALANDO' }[s] || 'ONLINE';
+  $('#core-sub').textContent = sub || { standby: 'EM ESPERA', thinking: 'PENSANDO', speaking: 'RESPONDENDO' }[s] || '';
+  $('#stop').hidden = !(s === 'thinking' || ttsState !== 'idle');
+  renderBadge();
+}
+function renderBadge() {
+  const b = $('#badge');
+  let label = 'ONLINE', cls = 'ok', why = 'IA pronta.';
+  if (uiState === 'thinking') { label = 'PROCESSANDO'; cls = 'active'; why = 'Pensando na resposta.'; }
+  else if (ttsState !== 'idle') { label = 'FALANDO'; cls = 'active'; why = 'Lendo a resposta em voz alta.'; }
+  else if (!navigator.onLine) { label = 'OFFLINE'; cls = 'bad'; why = 'Sem conexão: só cálculos, memória e tarefas locais.'; }
+  else if (aiReady === 'checking') { label = 'INICIANDO'; cls = ''; why = 'Conectando à IA.'; }
+  else if (aiReady !== 'ok' && aiReady !== 'ready') { label = 'LIMITADO'; cls = 'warn'; why = 'IA indisponível nesta visualização: comandos e cálculos locais funcionam.'; }
+  b.textContent = label; b.className = `badge ${cls}`; b.title = why;
+}
+setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
+
+// ====================================================================== voz (Claude TTS)
+function speakable(t) { return String(t).replace(/https?:\/\/\S+/g, '').replace(/[*_#`>|]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 1900); }
+function speak(text) {
+  if (!tts || !state.voice) return;
+  const s = speakable(text); if (!s) return;
+  tts.speak(s, { language: 'pt-BR' }).catch((e) => {
+    if (e.code === 'not_granted' || e.code === 'unavailable') { tts = null; $('#voice-toggle').hidden = true; }
+  });
+}
+function stopAll() { ctl?.abort(); tts?.stop().catch(() => {}); }
+
+// ====================================================================== BÍBLIA (progresso; o texto você lê na sua Bíblia)
+function buildPlan() {
+  const chs = []; let cur = state.bible.position;
+  for (let i = 0; i < state.bible.perDay; i++) { chs.push(cur); cur = nextRef(cur); }
+  return { date: todayKey(), chapters: chs, done: chs.map(() => false), completedAt: null };
+}
+function bibleOpen() {
+  const b = state.bible;
+  if (!b.plan || (b.plan.completedAt && b.plan.date < todayKey())) { b.plan = buildPlan(); persist(); }
+  const p = b.plan; const label = rangeLabel(p.chapters);
+  const next = p.chapters.find((_, i) => !p.done[i]);
+  if (p.completedAt) return `A leitura de hoje (${label}) já foi concluída. Amanhã continuamos em ${refLabel(b.position)}. Sequência: ${b.streak} dia(s).`;
+  return `Claro. Continuando de onde você parou: leitura de hoje ${label}. Você está em ${refLabel(next)} (${p.done.filter(Boolean).length} de ${p.chapters.length} capítulos lidos). Leia na sua Bíblia e diga "li o capítulo" a cada capítulo, ou "concluí a leitura".`;
+}
+function bibleChapterDone() {
+  const b = state.bible; if (!b.plan) bibleOpen();
+  const p = b.plan; const i = p.done.findIndex((d) => !d);
+  if (i < 0) return 'A leitura de hoje já está completa.';
+  p.done[i] = true;
+  if (p.done.every(Boolean)) return bibleComplete();
+  persist();
+  return `Marquei ${refLabel(p.chapters[i])} como lido. Próximo: ${refLabel(p.chapters[i + 1])}.`;
+}
+function bibleComplete() {
+  const b = state.bible; if (!b.plan) bibleOpen();
+  const p = b.plan; if (p.completedAt) return 'A leitura de hoje já está concluída.';
+  p.done = p.done.map(() => true); p.completedAt = new Date().toISOString();
+  b.position = nextRef(p.chapters[p.chapters.length - 1]);
+  const y = new Date(Date.now() - 86400000); const yk = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+  b.streak = b.lastDone === yk ? b.streak + 1 : b.lastDone === todayKey() ? b.streak : 1;
+  b.lastDone = todayKey(); persist();
+  return `Leitura de hoje concluída: ${rangeLabel(p.chapters)}. Sequência de ${b.streak} dia(s). A próxima começa em ${refLabel(b.position)} — só amanhã ou se você pedir "próxima leitura".`;
+}
+function bibleNextReading() { state.bible.plan = buildPlan(); persist(); return bibleOpen(); }
+
+// ====================================================================== TAREFAS / MEMÓRIA
+const pending = () => state.tasks.filter((t) => !t.done);
+let lastTaskId = null, awaiting = null;
+function addTask(text) { const t = { id: uid(), text: text.charAt(0).toUpperCase() + text.slice(1), done: false, createdAt: new Date().toISOString() }; state.tasks.push(t); lastTaskId = t.id; persist(); return t; }
+function completeTask(t) { t.done = true; t.doneAt = new Date().toISOString(); persist(); }
+function addMemory(text) { const m = { id: uid(), text, createdAt: new Date().toISOString() }; state.memories.push(m); persist(); return m; }
+const SENSITIVE = /\b(senha|cpf|cartao|cvv|token|pin)\b|\b(?:\d[ .-]?){11,16}\b/;
+
+// ====================================================================== COMANDOS LOCAIS (instantâneos)
+function route(raw) {
+  const t = norm(raw);
+  if (!t) return null;
+  if (awaiting === 'task' && !/^(cancela|deixa|esquece)/.test(t)) { awaiting = null; const k = addTask(raw.replace(/[.!]+$/, '').trim()); return { text: `Tarefa anotada: ${k.text}.`, tag: 'TAREFAS' }; }
+  awaiting = null;
+  // Bíblia
+  if (/^(a |minha )?biblia( sagrada)?$|\b(abr\w+|ler|leitura|continu\w+|retom\w+)\b.{0,20}\bbiblia\b|\bcontinu\w+ de onde (eu )?parei\b|^(continue|continua|continuar)$|\bleitura de hoje\b/.test(t)) return { text: bibleOpen(), tag: 'BÍBLIA' };
+  if (/\b(li|terminei|acabei|lido)\b.{0,12}\bcapitulo\b|^(li|proximo capitulo|passe a pagina|avance|avanca)$/.test(t)) return { text: bibleChapterDone(), tag: 'BÍBLIA' };
+  if (/\b(conclui|terminei|finalizei)\b.{0,6}\b(a )?leitura\b|\bterminei de ler\b/.test(t)) return { text: bibleComplete(), tag: 'BÍBLIA' };
+  if (/\bproxima leitura\b|\badiant\w+ (a )?leitura\b/.test(t)) return { text: bibleNextReading(), tag: 'BÍBLIA' };
+  if (/\bonde (eu )?parei\b/.test(t)) { const p = state.bible.plan; return { text: p && !p.completedAt ? `Você está na leitura ${rangeLabel(p.chapters)}, em ${refLabel(p.chapters.find((_, i) => !p.done[i]))}.` : `A próxima leitura começa em ${refLabel(state.bible.position)}.`, tag: 'BÍBLIA' }; }
+  // Dados ao vivo: a página não acessa a internet — nunca inventar
+  if (/^(as |me mostr\w+ as |quero ver as )?noticias?\b|\bme atualiz\w*\b|\bo que (esta acontecendo|aconteceu) (no brasil|no mundo|hoje)\b/.test(t) || /\b(dolar|euro|libra|cotacao|cambio)\b/.test(t) && !/\bcambio (do carro|manual|automatico)\b/.test(t) || /\b(gasolina|diesel|etanol|combustive(l|is))\b/.test(t) && /\b(quanto|preco|valor|esta|custa)\b/.test(t) && !/\bkm\/l\b/.test(t)) {
+    return { text: 'Aqui no artefato não tenho acesso à internet, então NÃO CONSIGO CONFIRMAR notícias, cotações ou preços de combustível agora — e não vou inventar. No JARVIS do seu computador (npm start) esses dados vêm das fontes oficiais: AwesomeAPI e Banco Central, ANP e feeds de notícias.', tag: 'NOTÍCIAS' };
+  }
+  // Tarefas
+  let m;
+  if (/^(cri\w+|adicion\w+|anot\w+|nova|faz\w*) (uma |a )?(nova )?tarefa$/.test(t)) { awaiting = 'task'; return { text: 'Claro. Qual é a tarefa?', tag: 'TAREFAS' }; }
+  if ((m = raw.match(/^\s*(?:jarvis[,\s]+)?(?:me\s+lembr\w+\s+(?:de\s+|que\s+)?|cri\w+\s+(?:uma\s+)?tarefa:?\s+(?:de\s+|para\s+)?|adicion\w+\s+(?:a\s+)?tarefa:?\s+|anot\w+\s+(?:a\s+)?tarefa:?\s+)(.+)$/i))) {
+    const txt = m[1].replace(/[.!]+$/, '').trim();
+    if (SENSITIVE.test(norm(txt))) return { text: 'Isso parece conter dados sensíveis. Por segurança, não vou salvar.', tag: 'TAREFAS' };
+    const k = addTask(txt); return { text: `Tarefa anotada: ${k.text}. Aparece em Tarefas e no "meu dia".`, tag: 'TAREFAS' };
+  }
+  if (/\b(minhas tarefas|quais (sao )?(as |minhas )?tarefas|tarefas pendentes|o que (eu )?tenho (pra|para) fazer)\b/.test(t)) { const p = pending(); return { text: p.length ? `Você tem ${p.length} tarefa(s):\n${p.map((x, i) => `${i + 1}) ${x.text}`).join('\n')}` : 'Nenhuma tarefa pendente.', tag: 'TAREFAS' }; }
+  if (/^(conclui|feito|ja fiz|fiz|pronto)( essa| a tarefa)?$|^marqu?\w* (isso |essa |a tarefa )?como (concluid[oa]|feit[oa]|pront[oa])$|\bconclui a tarefa (\d+)\b/.test(t)) {
+    const n = (t.match(/tarefa (\d+)/) || [])[1]; const p = pending();
+    const k = n ? p[n - 1] : p.find((x) => x.id === lastTaskId) || (p.length === 1 ? p[0] : null);
+    if (!k) return { text: 'Qual tarefa? Diga "concluí a tarefa 1" ou abra Tarefas.', tag: 'TAREFAS' };
+    completeTask(k); return { text: `Concluída: ${k.text}. 👍`, tag: 'TAREFAS' };
+  }
+  // Memória
+  if ((m = raw.match(/^\s*(?:jarvis[,\s]+)?(?:lembr[ae]|guard[ae]|memoriz\w+|anot[ae])\s+(?:que|de que|isso:|o seguinte:?)\s+(.+)$/i))) {
+    const txt = m[1].replace(/[.!]+$/, '').trim();
+    if (SENSITIVE.test(norm(txt))) return { text: 'Isso parece conter senha, documento ou cartão. Prefiro não guardar aqui.', tag: 'MEMÓRIA' };
+    addMemory(txt); return { text: `Certo, vou lembrar: ${txt}.`, tag: 'MEMÓRIA' };
+  }
+  if (/^(o que voce (lembra|sabe)( sobre mim)?|do que voce lembra|minhas memorias)$/.test(t)) return { text: state.memories.length ? `Lembro disso:\n${state.memories.map((x) => `• ${x.text}`).join('\n')}` : 'Ainda não tenho memórias. Diga "lembre que…".', tag: 'MEMÓRIA' };
+  // Meu dia / revisão
+  if (/^(o )?meu dia$|\b(o que (eu )?tenho (pra|para) hoje|resumo do (meu )?dia|faca uma revisao|revisao( do dia)?)\b/.test(t)) {
+    const p = pending(); const b = state.bible;
+    const lines = [`Seu dia — ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}:`,
+      `✅ Tarefas: ${p.length ? p.map((x) => x.text).join('; ') : 'nenhuma pendente'}.`,
+      `📖 Bíblia: ${b.plan && b.plan.date === todayKey() && b.plan.completedAt ? `leitura de hoje concluída (${rangeLabel(b.plan.chapters)})` : `leitura pendente, começando em ${refLabel(b.plan && !b.plan.completedAt ? b.plan.chapters.find((_, i) => !b.plan.done[i]) : b.position)}`} · sequência ${b.streak} dia(s).`,
+      `🧠 Memórias guardadas: ${state.memories.length}.`];
+    return { text: lines.join('\n'), tag: 'ROTINA' };
+  }
+  if (/^(que horas sao|que hora e)$/.test(t)) return { text: `Agora são ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`, tag: 'SISTEMA' };
+  if (/^(que dia e hoje|qual (e )?a data)$/.test(t)) return { text: `Hoje é ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.`, tag: 'SISTEMA' };
+  if (/^(me ajud\w+ a calcular|(faca|faz) uma conta|calculadora|preciso calcular)$/.test(t)) return { text: 'Claro. Diga a conta ou o problema, por exemplo: "15% de 230", "converta 100 km/h para m/s", "se eu andar a 80 km/h durante 12 minutos, quantos km percorro?", "quanto gasto em 300 km com 10 km/l e gasolina a 6,20" ou "qual a força para 10 kg a 9,8 m/s2".', tag: 'CÁLCULO' };
+  // Cálculos locais (física, motor, conversões, contas)
+  const ph = solvePhysics(t);
+  if (ph) return { text: ph.ask || `${ph.text}\nFórmula: ${ph.formula}.`, tag: ph.module };
+  const cv = tryConvert(t.replace(/^(converte|converter|converta|quanto e|quanto da|quantos|quantas)\s+/, '').replace(/^(e|da|sao)\s+/, ''));
+  if (cv && !cv.error) return { text: `${formatNumber(cv.value)} ${cv.from} = ${formatNumber(cv.result, 4)} ${cv.to}.`, tag: 'ENGENHARIA' };
+  const mt = tryMath(t);
+  if (mt) return { text: `${mt.expression.replace(/\*/g, '×').replace(/sqrt/g, '√')} = ${formatNumber(mt.value)}`, tag: 'CÁLCULO' };
+  return null;
+}
+
+// ====================================================================== IA (Claude, pela conta do usuário)
+function rules() {
+  const p = pending(); const b = state.bible;
+  return [
+    'Você é o JARVIS, assistente pessoal do usuário. Fale SEMPRE em português do Brasil, de forma natural e humana, com respostas curtas (2 a 6 frases) porque elas também são lidas em voz alta. Evite markdown pesado, tabelas e listas longas.',
+    'Adapte o tom: assunto sério → sério, respeitoso e objetivo; conversa casual → descontraído; brincadeira → bem-humorado, sem exagero; desabafo → escute primeiro, acolha com naturalidade, faça uma pergunta aberta, nunca responda de forma robótica e nunca transforme em piada; estudo → explique passo a passo; técnico (motores, mecânica, física, eletrônica, matemática) → preciso, mostre a fórmula e as unidades, não invente precisão. Em emergência, oriente ligar para SAMU 192, Bombeiros 193, Polícia 190; em risco à vida ou pensamentos suicidas, acolha e indique o CVV 188 (gratuito, 24 h).',
+    'Regras inegociáveis: você NÃO tem acesso à internet nesta página. Nunca invente notícias, cotações, preços de combustível, resultados, placares, previsão do tempo nem dispositivos conectados; se perguntarem, diga que não consegue confirmar agora. Se não souber, diga que não sabe. Diagnóstico de motor à distância é hipótese: recomende inspeção profissional quando houver risco (freio, direção, superaquecimento, vazamento de combustível).',
+    `Agora: ${new Date().toLocaleString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.`,
+    `Memórias que o usuário pediu para guardar (use só quando relevante): ${state.memories.length ? state.memories.map((m) => m.text).join(' | ') : 'nenhuma'}.`,
+    `Tarefas pendentes: ${p.length ? p.map((x) => x.text).join(' | ') : 'nenhuma'}.`,
+    `Leitura bíblica: ${b.plan && !b.plan.completedAt ? `hoje ${rangeLabel(b.plan.chapters)}` : `próxima começa em ${refLabel(b.position)}`}.`,
+    aiTools ? 'Você pode usar as ferramentas para criar tarefas e guardar memórias QUANDO o usuário pedir claramente; confirme em uma frase o que fez.' : 'Se o usuário pedir para criar uma tarefa ou guardar algo, diga para ele usar "me lembre de…" ou "lembre que…".',
+  ].join('\n');
+}
+const TOOLS = [
+  { name: 'criar_tarefa', description: 'Cria uma tarefa pendente para o usuário. Use só quando ele pedir. Retorna a tarefa criada.', inputSchema: { type: 'object', properties: { texto: { type: 'string', description: 'A tarefa, curta' } }, required: ['texto'] }, execute: (i) => { const s = String(i.texto || '').trim(); if (!s) throw new Error('texto vazio'); if (SENSITIVE.test(norm(s))) throw new Error('dados sensíveis: não salvo'); const k = addTask(s); renderSheetIfOpen(); return { criada: k.text }; } },
+  { name: 'guardar_memoria', description: 'Guarda um fato ou preferência que o usuário pediu para lembrar. Nunca guarde senhas, documentos ou cartões.', inputSchema: { type: 'object', properties: { texto: { type: 'string' } }, required: ['texto'] }, execute: (i) => { const s = String(i.texto || '').trim(); if (!s) throw new Error('texto vazio'); if (SENSITIVE.test(norm(s))) throw new Error('dados sensíveis: não salvo'); addMemory(s); renderSheetIfOpen(); return { guardado: s }; } },
+];
+const ERR = {
+  not_granted: 'Você não autorizou o JARVIS a usar o Claude nesta página. Para liberar, abra o menu Permissões do artefato. Comandos, cálculos, Bíblia, tarefas e memória continuam funcionando.',
+  sampling_disabled: 'A IA não está disponível para esta conta. Comandos e cálculos locais continuam funcionando.',
+  rate_limited: 'Atingi o limite de uso da IA por agora. Tente de novo em alguns minutos; comandos e cálculos locais continuam funcionando.',
+  session_expired: 'Sua sessão expirou: entre de novo no Claude e recarregue a página.',
+  refused: 'Prefiro não responder a isso. Podemos falar de outra coisa?',
+  prompt_too_large: 'A conversa ficou longa demais. Apaguei o histórico antigo; repita a pergunta, por favor.',
+};
+async function askAI(text) {
+  const bubble = addMsg('jarvis', 'Pensando…', 'IA');
+  bubble.classList.add('thinking');
+  turns.push({ role: 'user', content: text });
+  while (turns.length > 20) turns.shift();
+  ctl = new AbortController();
+  const input = [{ role: 'user', content: `INSTRUÇÕES DO SISTEMA (não responda a isto, apenas siga):\n${rules()}` }, ...turns];
+  try {
+    const opts = { signal: ctl.signal, onText: ({ text: t }) => { bubble.classList.remove('thinking'); bubble.textContent = t; T.scrollTop = T.scrollHeight; } };
+    if (aiTools) opts.tools = TOOLS; else opts.cache = false;
+    const { text: answer, truncated } = await sample(input, opts);
+    bubble.classList.remove('thinking');
+    bubble.textContent = answer + (truncated ? '\n(resposta cortada — peça a continuação)' : '');
+    turns.push({ role: 'assistant', content: answer });
+    aiReady = 'ok'; renderBadge();
+    speak(answer);
+  } catch (e) {
+    bubble.classList.remove('thinking');
+    turns.pop();
+    if (e.code === 'cancelled') { bubble.textContent = (e.text || '') + (e.text ? '\n(interrompido)' : 'Interrompido.'); return; }
+    if (e.code === 'prompt_too_large') turns.length = 0;
+    if (e.code === 'tools_unavailable') { aiTools = false; bubble.textContent = 'Ajustando… envie de novo, por favor.'; return; }
+    if (e.code === 'not_granted' || e.code === 'sampling_disabled') { aiReady = 'denied'; renderBadge(); }
+    bubble.textContent = (e.text ? `${e.text}\n` : '') + (ERR[e.code] || 'A IA falhou agora (erro de conexão). Tente de novo; comandos locais continuam funcionando.');
+  } finally { ctl = null; }
+}
+
+// ====================================================================== fluxo principal
+async function handle(raw) {
+  const text = String(raw || '').trim();
+  if (!text || busy) return;
+  busy = true; $('#send').disabled = true;
+  stopAll();
+  addMsg('user', text);
+  try {
+    const local = route(text);
+    if (local) { addMsg('jarvis', local.text, local.tag); speak(local.text); renderSheetIfOpen(); return; }
+    if (!sample) { addMsg('jarvis', aiReady === 'checking' ? 'Ainda estou conectando à IA. Tente de novo em alguns segundos.' : 'A IA não está disponível nesta visualização (abra o artefato no claude.ai). Comandos, cálculos, Bíblia, tarefas e memória funcionam.', 'SISTEMA'); return; }
+    setState('thinking');
+    await askAI(text);
+  } finally {
+    busy = false; $('#send').disabled = false;
+    if (uiState === 'thinking') setState('standby');
+  }
+}
+
+$('#form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#input').value; $('#input').value = ''; handle(v); });
+$('#core').addEventListener('click', () => $('#input').focus());
+$('#stop').addEventListener('click', () => { stopAll(); setState('standby'); });
+$('#voice-toggle').addEventListener('click', () => {
+  state.voice = !state.voice; persist();
+  $('#voice-toggle').textContent = state.voice ? '🔊' : '🔇';
+  if (!state.voice) tts?.stop().catch(() => {});
+  addMsg('system', state.voice ? 'Voz ligada.' : 'Modo silencioso: respondo só na tela.');
+});
+document.addEventListener('click', (e) => {
+  const s = e.target.closest('[data-say]'); if (s) handle(s.dataset.say);
+  const o = e.target.closest('[data-open]'); if (o) openSheet(o.dataset.open);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#sheet-wrap').hidden) { e.preventDefault(); closeSheet(); } });
+window.addEventListener('online', renderBadge); window.addEventListener('offline', renderBadge);
+
+// ====================================================================== painéis
+let sheet = null;
+function openSheet(name) { sheet = name; $('#sheet-wrap').hidden = false; renderSheet(); $('#sheet-close').focus(); }
+function closeSheet() { sheet = null; $('#sheet-wrap').hidden = true; }
+function renderSheetIfOpen() { if (sheet) renderSheet(); }
+$('#sheet-close').addEventListener('click', closeSheet);
+$('#sheet-wrap').addEventListener('click', (e) => { if (e.target.id === 'sheet-wrap') closeSheet(); });
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function row(title, sub, right) { const r = el('div', 'row'); const l = el('div'); l.appendChild(el('b', null, title)); if (sub) l.appendChild(el('small', null, sub)); r.append(l); if (right) r.append(right); return r; }
+function stEl(label, cls) { return el('span', `st ${cls}`, label); }
+
+function renderSheet() {
+  const body = $('#sheet-body'); body.replaceChildren();
+  if (sheet === 'tasks') {
+    $('#sheet-title').textContent = 'TAREFAS';
+    const p = pending();
+    if (!p.length) body.append(el('p', 'muted', 'Nenhuma tarefa pendente.'));
+    p.forEach((k) => { const b = el('button', 'btn', 'Concluir'); b.type = 'button'; b.onclick = () => { completeTask(k); addMsg('jarvis', `Concluída: ${k.text}. 👍`, 'TAREFAS'); renderSheet(); }; body.append(row(k.text, `criada em ${new Date(k.createdAt).toLocaleDateString('pt-BR')}`, b)); });
+    const done = state.tasks.filter((x) => x.done).slice(-5).reverse();
+    if (done.length) { body.append(el('p', 'hint', 'Concluídas recentemente:')); done.forEach((k) => body.append(row(k.text, null, stEl('FEITA', 'ok')))); }
+    body.append(addForm('Nova tarefa…', (v) => { addTask(v); renderSheet(); }));
+  } else if (sheet === 'memory') {
+    $('#sheet-title').textContent = 'MEMÓRIA';
+    body.append(el('p', 'hint', 'Só guardo o que você pedir ("lembre que…"). Senhas, documentos e cartões são recusados.'));
+    if (!state.memories.length) body.append(el('p', 'muted', 'Sem memórias ainda.'));
+    state.memories.forEach((m) => { const b = el('button', 'btn danger', 'Apagar'); b.type = 'button'; b.onclick = () => { if (b.dataset.armed) { state.memories = state.memories.filter((x) => x.id !== m.id); persist(); renderSheet(); } else { b.dataset.armed = '1'; b.textContent = 'Confirmar?'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Apagar'; } }, 4000); } }; body.append(row(m.text, new Date(m.createdAt).toLocaleDateString('pt-BR'), b)); });
+    body.append(addForm('Algo para lembrar…', (v) => { if (SENSITIVE.test(norm(v))) { addMsg('system', 'Recusado: parece conter dados sensíveis.'); return; } addMemory(v); renderSheet(); }));
+  } else if (sheet === 'diag') {
+    $('#sheet-title').textContent = 'DIAGNÓSTICO';
+    const aiL = aiReady === 'ok' ? ['OK', 'ok', 'Claude respondeu nesta sessão.'] : aiReady === 'checking' ? ['VERIFICANDO', 'muted', 'Conectando…'] : sample ? ['PRONTA', 'warn', 'Disponível; na primeira mensagem o Claude pede sua autorização.'] : aiReady === 'denied' ? ['INDISPONÍVEL', 'bad', 'Uso do Claude não autorizado ou desativado nesta conta.'] : ['INDISPONÍVEL', 'bad', 'Esta visualização não oferece IA (abra no claude.ai).'];
+    body.append(row('IA (conversa)', aiL[2], stEl(aiL[0], aiL[1])));
+    body.append(row('Voz (resposta falada)', tts ? (state.voice ? 'Voz do Claude em português; botão PARAR interrompe.' : 'Desligada (modo silencioso).') : 'Não disponível neste navegador/app (Safari, Firefox e apps de celular não oferecem). As respostas aparecem na tela.', stEl(tts ? (state.voice ? 'OK' : 'DESLIGADA') : 'INDISPONÍVEL', tts ? (state.voice ? 'ok' : 'warn') : 'bad')));
+    body.append(row('Memória, tarefas e Bíblia', store.kind === 'db' ? `Salvas na sua conta (sincroniza entre aparelhos)${store.error ? ` · último erro: ${store.error}` : ''}.` : 'Salvas só neste navegador (armazenamento da conta indisponível nesta visualização).', stEl(store.kind === 'db' && !store.error ? 'OK' : 'LIMITADO', store.kind === 'db' && !store.error ? 'ok' : 'warn')));
+    body.append(row('Cálculos (motor, física, contas, conversões)', 'Locais, instantâneos, funcionam sem internet.', stEl('OK', 'ok')));
+    body.append(row('Bíblia', 'Plano diário e progresso funcionam; o texto você lê na sua Bíblia (o artefato não tem o texto bíblico).', stEl('LIMITADO', 'warn')));
+    body.append(row('Notícias, câmbio, combustíveis', 'A página não acessa a internet: nada é inventado. Use o JARVIS do computador.', stEl('INDISPONÍVEL', 'bad')));
+    body.append(row('Microfone / palmas', 'Próxima etapa.', stEl('PENDENTE', 'muted')));
+    body.append(row('Internet do aparelho', navigator.onLine ? 'Conectado.' : 'Sem conexão.', stEl(navigator.onLine ? 'ONLINE' : 'OFFLINE', navigator.onLine ? 'ok' : 'bad')));
+  } else if (sheet === 'bible') {
+    $('#sheet-title').textContent = 'BÍBLIA';
+  }
+}
+function addForm(ph, onAdd) {
+  const f = el('form', 'inline'); const i = el('input'); i.placeholder = ph; i.maxLength = 300; const b = el('button', 'btn primary', 'Adicionar'); b.type = 'submit';
+  f.append(i, b); f.addEventListener('submit', (e) => { e.preventDefault(); const v = i.value.trim(); if (v) { onAdd(v); } }); return f;
+}
+
+// ====================================================================== inicialização
+$('#voice-toggle').textContent = state.voice ? '🔊' : '🔇';
+setState('standby');
+const h = new Date().getHours();
+addMsg('jarvis', `${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}. JARVIS online. Pode conversar comigo sobre qualquer assunto, pedir contas, abrir a Bíblia, criar tarefas ou me pedir para lembrar de algo.`, 'SISTEMA');
+
+(async () => {
+  const c = window.claude;
+  if (!c?.use) { aiReady = 'none'; renderBadge(); return; }
+  const [s, t, db, user] = await Promise.all([c.use('sample'), c.use('tts'), c.use('db'), c.use('user')]);
+  sample = s; tts = t;
+  aiReady = sample ? 'ready' : 'none';
+  if (sample) { const lim = await sample.limits().catch(() => null); aiTools = !!lim?.tools; }
+  if (!tts) $('#voice-toggle').hidden = true;
+  else tts.onState(({ state: st }) => { ttsState = st; setState(uiState === 'thinking' ? 'thinking' : st !== 'idle' ? 'speaking' : 'standby'); });
+  renderBadge();
+  // armazenamento na conta (privado por pessoa)
+  const id = user ? await user.id() : null;
+  if (db && id) {
+    try {
+      store.ref = db.collection(`data/users/${id}`).doc('jarvis');
+      const snap = await store.ref.get();
+      if (snap.exists) { adopt(snap.data()); $('#voice-toggle').textContent = state.voice ? '🔊' : '🔇'; renderSheetIfOpen(); }
+      else persist(); // primeira vez: leva o que havia neste navegador
+      store.kind = 'db';
+    } catch (e) { store.ref = null; store.error = e.code || 'erro'; }
+  }
+})();
+})();
+</script>
