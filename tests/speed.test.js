@@ -88,7 +88,7 @@ test('cumprimentos e agradecimentos respondem na hora, sem chamar a IA (mesmo co
     ['127.0.0.1:11434/api/chat', () => { chats++; return jsonResponse({ message: { content: 'Resposta da IA.' } }); }],
   ]);
   await llm.refresh({ force: true });
-  for (const q of ['boa noite', 'Jarvis, boa noite!', 'oi', 'obrigado', 'valeu jarvis', 'tudo bem?', 'tchau']) {
+  for (const q of ['boa noite', 'Jarvis, boa noite!', 'oi', 'obrigado', 'valeu jarvis', 'tudo bem?', 'tchau', 'Bom dia, Jarvis, tudo bem?', 'oi jarvis, como vai?', 'estou bem, e você?']) {
     const t0 = Date.now();
     const r = await processInput(q, { sessionId: 'speed-social' });
     assert.ok(Date.now() - t0 < 200, `${q}: ${Date.now() - t0} ms`);
@@ -164,4 +164,23 @@ test('primeiro uso de um modelo: ajusta os núcleos sozinho (uma vez só) e avis
     bus.off(EVENTS.AI_BENCHMARK_START, onStart);
     process.env.JARVIS_AUTOTUNE = '0';
   }
+});
+
+test('pré-carregamento e conversa usam as MESMAS opções do modelo (senão o Ollama recarrega tudo)', async () => {
+  process.env.JARVIS_AI_THREADS = '4';
+  const seen = [];
+  mock = mockFetch([
+    ['127.0.0.1:11434/api/tags', () => jsonResponse({ models: [{ name: 'qwen2.5:0.5b' }] })],
+    ['127.0.0.1:11434/api/generate', (u, o) => { seen.push({ kind: 'warm', options: JSON.parse(o.body).options }); return jsonResponse({ done: true }); }],
+    ['127.0.0.1:11434/api/chat', (u, o) => { const b = JSON.parse(o.body); const { num_predict, ...rest } = b.options; seen.push({ kind: 'chat', options: rest }); return jsonResponse({ message: { content: 'ok' } }); }],
+  ]);
+  try {
+    await llm.refresh({ force: true });
+    await new Promise((r) => setTimeout(r, 50));
+    await processInput('qual o maior deserto do mundo?', { sessionId: 'speed-opts' });
+    const warm = seen.find((x) => x.kind === 'warm'); const chat = seen.find((x) => x.kind === 'chat');
+    assert.ok(warm && chat);
+    assert.deepEqual(warm.options, chat.options);
+    assert.deepEqual(chat.options, { num_ctx: local.NUM_CTX, num_thread: 4 });
+  } finally { delete process.env.JARVIS_AI_THREADS; }
 });

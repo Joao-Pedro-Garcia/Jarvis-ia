@@ -76,6 +76,9 @@ export const localInfo = () => ({ detected, lastProbe });
 // cada pergunta), limita o contexto e o tamanho da resposta → respostas rápidas.
 export const KEEP_ALIVE = '60m';
 export const NUM_CTX = 2048;
+/** Opções do modelo — IGUAIS em pré-carregamento, conversa e resposta em pedaços.
+ *  Se mudarem entre pedidos, o Ollama recarrega o modelo e descarta o que já leu. */
+export const modelOptions = (extra = {}) => ({ num_ctx: NUM_CTX, ...(threads() ? { num_thread: threads() } : {}), ...extra });
 /** Núcleos do processador para a IA (JARVIS_AI_THREADS). No celular, usar só os núcleos rápidos costuma ser mais veloz. */
 export const threads = () => {
   const ok = (n) => Number.isInteger(n) && n > 0 && n <= 32;
@@ -103,7 +106,7 @@ async function ollamaChat({ system, messages, maxTokens, json, timeoutMs }) {
     messages: [{ role: 'system', content: system }, ...messages],
     stream: false,
     keep_alive: KEEP_ALIVE,
-    options: { num_predict: maxTokens, num_ctx: NUM_CTX, ...(threads() ? { num_thread: threads() } : {}) },
+    options: modelOptions({ num_predict: maxTokens }),
     ...(json ? { format: json } : {}),
   }, timeoutMs);
   const text = data?.message?.content;
@@ -156,7 +159,7 @@ async function ollamaChatStream({ system, messages, maxTokens, onToken, idleMs =
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
       body: JSON.stringify({
         model: detected.model, messages: [{ role: 'system', content: system }, ...messages], stream: true, keep_alive: KEEP_ALIVE,
-        options: { num_predict: maxTokens, num_ctx: NUM_CTX, ...(threads() ? { num_thread: threads() } : {}) },
+        options: modelOptions({ num_predict: maxTokens }),
       }),
     });
     if (!res.ok) { const d = await res.json().catch(() => null); throw Object.assign(new Error(d?.error || `HTTP ${res.status}`), { status: res.status }); }
@@ -187,10 +190,10 @@ async function ollamaChatStream({ system, messages, maxTokens, onToken, idleMs =
 }
 
 /** Carrega o modelo na memória logo ao iniciar (a primeira pergunta não espera). */
-export async function warmUp() {
-  if (!detected || detected.kind !== 'ollama' || detected.warmed) return false;
+export async function warmUp({ force = false } = {}) {
+  if (!detected || detected.kind !== 'ollama' || (detected.warmed && !force)) return false;
   detected.warmed = true;
-  await postJson(`${detected.base}/api/generate`, { model: detected.model, keep_alive: KEEP_ALIVE, ...(threads() ? { options: { num_thread: threads() } } : {}) }, 120000);
+  await postJson(`${detected.base}/api/generate`, { model: detected.model, keep_alive: KEEP_ALIVE, options: modelOptions() }, 120000);
   return true;
 }
 /** Usado pelos testes. */

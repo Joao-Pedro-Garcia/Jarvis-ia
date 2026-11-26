@@ -31,6 +31,9 @@ export function runBenchmark({ auto = false } = {}) {
   localBenchmark([2, 4, 8]).then((r) => {
     if (!r.best) return { auto, text: `O teste de velocidade falhou em todas as configurações: ${r.results.map((x) => `${x.threads} núcleos: ${x.error}`).join('; ')}.` };
     updateSettings({ ai: { threads: r.best.threads, tunedFor: model } });
+    // O teste deixou o modelo carregado com outra configuração: recarrega já com a escolhida,
+    // para a próxima pergunta não pagar esse recarregamento.
+    warmUp({ force: true }).catch(() => {});
     log.info('cerebro', `Velocidade da IA ajustada: ${r.best.threads} núcleos (≈ ${r.best.estSeconds} s por resposta)`);
     const lines = r.results.map((x) => (x.error ? `${x.threads} núcleos: falhou (${x.error})` : `${x.threads} núcleos: leitura ${x.promptRate} tokens/s · escrita ${x.evalRate} tokens/s · resposta típica ≈ ${x.estSeconds} s`));
     return {
