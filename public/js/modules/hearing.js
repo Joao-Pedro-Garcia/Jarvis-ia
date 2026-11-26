@@ -36,10 +36,17 @@ let outcome = { started: false, speech: false, error: null };
 export const lastListenOutcome = () => ({ ...outcome });
 
 /** Escuta UM comando. Resolve com o texto final (ou '' se nada). */
-export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
-  if (!SR) return Promise.reject(new Error('Reconhecimento de voz não suportado neste navegador. Use Chrome, Edge ou o navegador do Android — ou digite.'));
+// No Android o microfone leva um instante para ser liberado por outra escuta; começar
+// antes disso faz o reconhecimento do Google receber áudio fraco ("só ouve de perto").
+export const MIC_RELEASE_MS = ANDROID ? 400 : 0;
+export const waitMicRelease = () => new Promise((r) => setTimeout(r, MIC_RELEASE_MS));
+
+export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
+  if (!SR) throw new Error('Reconhecimento de voz não suportado neste navegador. Use Chrome, Edge ou o navegador do Android — ou digite.');
+  const hadWake = !!wakeRec;
   stopWake();
   if (active) stopListening();
+  if (hadWake && MIC_RELEASE_MS) await waitMicRelease();
   return new Promise((resolve, reject) => {
     rec = new SR();
     rec.lang = lang;
@@ -47,6 +54,7 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     rec.continuous = true; // controlamos o fim pelo silêncio
     rec.maxAlternatives = 1;
     let finalText = '';
+    let heard = false; // já chegou algum texto parcial (fala baixa costuma demorar a virar texto final)
     let settled = false;
     outcome = { started: false, speech: false, error: null };
     const finish = (err) => {
@@ -59,9 +67,15 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
       if (err) reject(err); else resolve(finalText.trim());
       resumeWake();
     };
-    const armSilence = () => { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => finish(), finalText ? silenceMs : Math.max(silenceMs * 3, 6000)); };
+    // Paciência: fala já transcrita → encerra após o silêncio configurado; voz percebida mas
+    // ainda sem texto final → espera mais; nada ainda → espera até 8 s antes de desistir.
+    const armSilence = () => {
+      clearTimeout(silenceTimer);
+      const wait = finalText ? silenceMs : heard || outcome.speech ? Math.max(silenceMs * 2, 3500) : Math.max(silenceMs * 4, 8000);
+      silenceTimer = setTimeout(() => finish(), wait);
+    };
     // Só agora o navegador confirmou que está ouvindo de verdade.
-    rec.onspeechstart = () => { outcome.speech = true; };
+    rec.onspeechstart = () => { outcome.speech = true; armSilence(); };
     rec.onstart = () => { outcome.started = true; active = true; micState('active'); bus.emit(EVENTS.LISTEN_STARTED); clientLog('ouvido', 'Escuta iniciada'); armSilence(); };
     rec.onresult = (e) => {
       let interim = '';
@@ -70,6 +84,7 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
         if (r.isFinal) finalText += `${r[0].transcript} `;
         else interim += r[0].transcript;
       }
+      if (interim.trim()) heard = true;
       bus.emit(EVENTS.VOICE_INTERIM, { text: (finalText + interim).trim() });
       armSilence();
     };

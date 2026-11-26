@@ -7,7 +7,7 @@ import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
-import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome } from './modules/hearing.js';
+import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
 import { speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
@@ -234,6 +234,7 @@ function applyUi(res) {
 }
 
 // ============================================================ ouvido
+let listenStarting = false;
 async function startListening({ chime = true, greet = null, quiet = false } = {}) {
   if (!hearingSupported) {
     addMsg('system', 'Reconhecimento de voz não suportado neste navegador. Digite seu comando no campo abaixo (para falar, use Chrome, Edge ou o navegador do Android).');
@@ -242,15 +243,25 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
   }
   if (!window.isSecureContext) { addMsg('system', '⚠ O microfone exige HTTPS (ou localhost). Veja “Usar no Android” no README.'); return; }
   if (isListening()) { stopListening(); setState('standby'); return; }
-  stopAll();
-  await wake?.pause();
-  if (greet) await say(greet);
-  if (chime) sounds.activate();
+  // Trava: palmas + toque quase juntos não podem abrir duas escutas que disputam o microfone.
+  if (listenStarting) return;
+  listenStarting = true;
+  try {
+    stopAll();
+    const clapWasOn = !!wake?.status()?.clap?.running;
+    await wake?.pause();
+    // Espera o detector de palmas soltar o microfone antes de o Google começar a ouvir.
+    if (clapWasOn && MIC_RELEASE_MS) await waitMicRelease();
+    if (greet) await say(greet);
+    if (chime) sounds.activate();
+  } catch (err) { listenStarting = false; throw err; }
   // Só mostra OUVINDO quando o navegador confirmar (evento LISTEN_STARTED).
   setState('standby', 'ATIVANDO MICROFONE');
   const s = getSettings();
   try {
-    const text = await listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
+    const listening = listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
+    listenStarting = false; // a escuta já começou: um novo toque passa a encerrá-la
+    const text = await listening;
     $('#interim').textContent = '';
     if (!text) {
       setState('standby');
@@ -275,6 +286,7 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
     sounds.error();
     addMsg('system', `⚠ ${err.message}`);
   } finally {
+    listenStarting = false;
     wake?.resume(getSettings());
     updateChips();
   }
