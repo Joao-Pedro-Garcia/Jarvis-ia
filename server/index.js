@@ -252,6 +252,7 @@ async function api(req, res, url) {
     }
     // Voz do JARVIS: texto → áudio (MP3 da voz neural ou WAV do eSpeak). 503 = o navegador usa a voz do celular.
     case 'GET /api/tts': return send(res, 200, tts.ttsStatus());
+    case 'GET /api/tts/test': return send(res, 200, await tts.testNeural({ voice: url.searchParams.get('voice') || undefined }));
     case 'POST /api/tts': {
       if (rateLimited(ip, 'tts', 240)) return send(res, 429, { error: 'Muitas falas seguidas. Aguarde um instante.' });
       const body = await readBody(req);

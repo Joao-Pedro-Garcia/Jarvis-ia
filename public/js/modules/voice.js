@@ -54,6 +54,7 @@ let serverDownUntil = 0;
 let lastEngine = null;
 const urls = new Set();
 const player = () => (audioEl ||= new Audio());
+export const resetJarvisVoice = () => { serverDownUntil = 0; };
 export const usingJarvisVoice = () => opts.engine === 'jarvis' && Date.now() >= serverDownUntil;
 
 async function fetchAudio(text) {
@@ -124,6 +125,7 @@ export async function speak(text) {
       if (token !== speakingToken) return false;
       serverDownUntil = Date.now() + 60000;
       clientLog('voz', `Voz do JARVIS indisponível (${err.message}); usando a voz do celular`, 'warn');
+      bus.emit('voice:fallback', { reason: err.message });
     }
   }
   if (!synth) { bus.emit(EVENTS.SPEECH_FINISHED, { completed: false }); return false; }

@@ -82,3 +82,17 @@ export function ttsStatus() {
     espeak: !!findEspeak(),
   };
 }
+
+/** Teste real da voz própria (ignora a pausa de 1 min após falha). Nunca lança. */
+export async function testNeural({ voice = DEFAULT_VOICE } = {}) {
+  const t = Date.now();
+  try {
+    const audio = await synthesize('Teste de voz do JARVIS.', { voice });
+    neuralDownUntil = 0; neuralLastError = null;
+    return { ok: true, ms: Date.now() - t, bytes: audio.length, espeak: !!findEspeak() };
+  } catch (err) {
+    neuralLastError = err.message;
+    log.warn('sistema', `Teste da voz neural falhou: ${err.message}`);
+    return { ok: false, error: err.message, ms: Date.now() - t, espeak: !!findEspeak() };
+  }
+}

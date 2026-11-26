@@ -32,6 +32,12 @@ main() {
   fi
   [ -d node_modules ] || npm install --no-audit --no-fund --silent
 
+  # Voz masculina offline de reserva (eSpeak), usada quando a voz própria não tiver internet
+  if ! command -v espeak >/dev/null 2>&1 && ! command -v espeak-ng >/dev/null 2>&1 && command -v pkg >/dev/null 2>&1; then
+    msg "Instalando a voz masculina offline de reserva (eSpeak)…"
+    pkg install -y espeak >/dev/null 2>&1 || msg "Não consegui instalar o eSpeak agora (sem internet?)."
+  fi
+
   # 3) IA local (Ollama)
   if command -v ollama >/dev/null 2>&1; then
     if ! ollama_up; then

@@ -8,7 +8,7 @@ import { getSettings, applyServerSettings, saveSettings } from './core/settings.
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
 import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
-import { speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
+import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
@@ -72,6 +72,11 @@ function recentCommand(intent, module, ok = true) {
 }
 
 // ============================================================ voz
+let fallbackWarned = false;
+bus.on('voice:fallback', ({ reason } = {}) => {
+  if (fallbackWarned) return; fallbackWarned = true;
+  addMsg('system', `⚠️ A voz própria do JARVIS não respondeu (${reason}). Falando com a voz do celular por enquanto. Detalhes: Configurações → VOZ → Testar voz.`);
+});
 /** Fala, com possibilidade de interrupção por "pare" (voz) ou duas palmas. */
 async function say(text) {
   const s = getSettings();
@@ -419,7 +424,18 @@ function applySettings(s, changedKey) {
   if (changedKey === 'hearing.wakeWord') wake?.setWakeWord(s.hearing.wakeWord, s);
   if (changedKey === 'ui.keepAwake' || changedKey === 'boot') setKeepAwake(!!s.ui.keepAwake).then((ok) => { if (s.ui.keepAwake && !ok) toast('Este navegador não permite manter a tela ligada.'); });
   if (changedKey === 'voice.silent' && s.voice.silent) stopAll();
-  if (changedKey === 'test-voice') { if (s.voice.silent) toast('Modo silencioso ativo.'); else say('Olá. Esta é a minha voz atual.'); }
+  if (changedKey === 'test-voice') {
+    if (s.voice.silent) toast('Modo silencioso ativo.');
+    else if (s.voice.engine === 'celular') say('Olá. Esta é a voz do celular.');
+    else {
+      // Testa de verdade a voz própria no servidor e diz o motivo se falhar.
+      toast('Testando a voz própria…');
+      api.get(`/api/tts/test?voice=${encodeURIComponent(s.voice.neuralVoice || '')}`).then((r) => {
+        if (r.ok) { resetJarvisVoice(); addMsg('system', `🔊 Voz própria funcionando (gerada em ${r.ms} ms).`); say('Olá, senhor. Esta é a minha voz.'); }
+        else { addMsg('system', `⚠️ Voz própria falhou: ${r.error}. ${r.espeak ? 'Usando a voz offline (eSpeak).' : 'Usando a voz do celular.'}`); say('Esta é a voz de reserva.'); }
+      }).catch(() => { addMsg('system', '⚠️ Não consegui falar com o servidor do JARVIS para testar a voz.'); });
+    }
+  }
   updateChips();
 }
 function openSettings() { showSettings({ onChange: (s, key) => applySettings(s, key) }); }
