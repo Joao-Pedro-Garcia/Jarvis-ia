@@ -149,7 +149,9 @@ export async function getSummary({ parts = ['exchange', 'fuel', 'brazil', 'world
       }
     } else {
       try {
-        stories = llm.available() ? await aiSelect(feeds.items, h) : heuristicSelect(feeds.items, h);
+        // Escolher entre até 140 manchetes é pesado demais para uma IA local pequena
+        // (no celular estoura o tempo): só a IA online faz essa seleção.
+        stories = llm.available() && llm.kind() === 'online' ? await aiSelect(feeds.items, h) : heuristicSelect(feeds.items, h);
       } catch (err) {
         log.warn('noticias', `Seleção por IA falhou (${err.message}); usando seleção automática`);
         stories = heuristicSelect(feeds.items, h);

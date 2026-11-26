@@ -7,7 +7,7 @@ import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
-import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn } from './modules/hearing.js';
+import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome } from './modules/hearing.js';
 import { speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
@@ -179,7 +179,7 @@ async function handleInput(text, source = 'text') {
   await say(res.speech);
   const s = getSettings();
   const asked = res.awaitingConfirmation || /\?\s*$/.test(res.text || '');
-  if (source === 'voice' && s?.hearing?.continuousConversation && asked && !isSpeaking()) startListening({ chime: true });
+  if (source === 'voice' && s?.hearing?.continuousConversation && asked && !isSpeaking()) startListening({ chime: true, quiet: true });
   else if (getState() !== 'error') setState('standby');
 }
 
@@ -219,7 +219,7 @@ function applyUi(res) {
 }
 
 // ============================================================ ouvido
-async function startListening({ chime = true, greet = null } = {}) {
+async function startListening({ chime = true, greet = null, quiet = false } = {}) {
   if (!hearingSupported) {
     addMsg('system', 'Reconhecimento de voz não suportado neste navegador. Digite seu comando no campo abaixo (para falar, use Chrome, Edge ou o navegador do Android).');
     $('#command-input').focus();
@@ -237,7 +237,20 @@ async function startListening({ chime = true, greet = null } = {}) {
   try {
     const text = await listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
     $('#interim').textContent = '';
-    if (!text) { setState('standby'); return; }
+    if (!text) {
+      setState('standby');
+      // Escuta pedida pelo usuário que não transcreveu nada: diz o motivo (nunca fica calado).
+      const o = lastListenOutcome();
+      // quiet: true → nunca avisa (escuta automática); 'silence' → só avisa se ouviu voz (palmas/"Jarvis").
+      if (quiet !== true && !(quiet === 'silence' && !o.speech) && o.error !== 'aborted') {
+        const why = !o.started ? 'O microfone não chegou a abrir. Toque no microfone de novo.'
+          : !o.speech ? `Não ouvi sua voz. Fale logo depois do sinal, perto do microfone.${getSettings()?.clap?.enabled ? ' Se continuar, desligue as palmas em Configurações (elas usam o mesmo microfone).' : ''}${isAndroid ? ' Confira também a permissão de microfone do app Google.' : ''}`
+          : 'Ouvi sua voz, mas não consegui transcrever. Fale um pouco mais devagar e perto do microfone.';
+        addMsg('system', `🎙 ${why}`);
+        clientLog('ouvido', `Nada transcrito: microfone ${o.started ? 'abriu' : 'não abriu'}, voz ${o.speech ? 'detectada' : 'não detectada'}${o.error ? `, erro ${o.error}` : ''}`, 'warn');
+      }
+      return;
+    }
     clientLog('ouvido', `Transcrição recebida (${text.length} caracteres)`);
     bus.emit(EVENTS.VOICE_RECEIVED, { text });
     await handleInput(text, 'voice');
@@ -268,17 +281,17 @@ bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 // PALMS_DETECTED: duas palmas reconhecidas → "Sim?" → ouvir → cérebro → resposta.
 bus.on(EVENTS.PALMS_DETECTED, (evt) => {
   if (evt?.test) return; // teste do diagnóstico: não inicia conversa
-  if (asleep) { wakeUp('duas palmas'); startListening({ chime: false, greet: 'Sim?' }); return; }
+  if (asleep) { wakeUp('duas palmas'); startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
   if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
-  startListening({ chime: false, greet: 'Sim?' });
+  startListening({ chime: false, greet: 'Sim?', quiet: 'silence' });
 });
 bus.on(EVENTS.VOICE_RECEIVED, ({ text, wake: isWake }) => {
   if (!isWake) return;
   const woke = wakeUp('Jarvis');
-  if (woke && !(text && text.length > 1)) { startListening({ chime: false, greet: 'Sim?' }); return; }
-  if (text && text.length > 1) handleInput(text, 'voice'); else startListening({ chime: false, greet: 'Sim?' });
+  if (woke && !(text && text.length > 1)) { startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
+  if (text && text.length > 1) handleInput(text, 'voice'); else startListening({ chime: false, greet: 'Sim?', quiet: 'silence' });
 });
 bus.on('bible:message', (msg) => { addMsg('jarvis', msg, { tag: 'BÍBLIA' }); if (/concluíd/.test(msg)) say(msg); });
 bus.on(EVENTS.BIBLE_OPENED, (v) => { renderBibleMini(v); try { if (v && !v.error) localStorage.setItem('jarvis.bible', JSON.stringify(v)); } catch {} });
@@ -393,7 +406,7 @@ $('#command-form').addEventListener('submit', (e) => {
 });
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
 $('#core-button').addEventListener('click', () => {
-  if (asleep) { wakeUp('toque'); startListening({ chime: false, greet: 'Sim?' }); return; }
+  if (asleep) { wakeUp('toque'); startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
   return isSpeaking() || isPaused() ? stopAll() : startListening();
 });
 $('#stop-btn').addEventListener('click', stopAll);

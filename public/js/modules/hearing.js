@@ -17,17 +17,23 @@ let wakeEnabled = false;
 let wakeName = 'jarvis';
 let silenceTimer = null;
 
+const ANDROID = /Android/i.test(navigator.userAgent);
+const GOOGLE_HELP = ' No Android, quem transcreve a voz é o app Google: abra Configurações → Apps → Google → Permissões → Microfone → Permitir. Confira também se o microfone está permitido para este site no Chrome (ícone ⓘ ao lado do endereço).';
 const ERRORS = {
-  'not-allowed': 'Permissão do microfone negada. Libere o microfone nas configurações do navegador.',
-  'service-not-allowed': 'O navegador bloqueou o reconhecimento de voz.',
+  'not-allowed': `O reconhecimento de voz foi bloqueado.${ANDROID ? GOOGLE_HELP : ' Libere o microfone nas configurações do navegador (cadeado ou ⓘ ao lado do endereço).'}`,
+  'service-not-allowed': `O serviço de reconhecimento de voz está bloqueado ou desativado.${ANDROID ? `${GOOGLE_HELP} Atualize também o app Google na Play Store.` : ''}`,
   'no-speech': 'Não ouvi nada.',
   'audio-capture': 'Nenhum microfone encontrado.',
-  network: 'O reconhecimento de voz precisa de internet neste navegador.',
+  network: `O reconhecimento de voz precisa de internet${ANDROID ? ' (no Android ele usa o serviço de voz do Google)' : ' neste navegador'}. Confira o Wi-Fi ou os dados móveis.`,
   aborted: null,
   'language-not-supported': 'Idioma não suportado pelo reconhecimento de voz.',
 };
 
 export const isListening = () => active;
+
+// Como terminou a última escuta (para explicar ao usuário quando nada foi transcrito).
+let outcome = { started: false, speech: false, error: null };
+export const lastListenOutcome = () => ({ ...outcome });
 
 /** Escuta UM comando. Resolve com o texto final (ou '' se nada). */
 export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
@@ -42,6 +48,7 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     rec.maxAlternatives = 1;
     let finalText = '';
     let settled = false;
+    outcome = { started: false, speech: false, error: null };
     const finish = (err) => {
       if (settled) return; settled = true;
       clearTimeout(silenceTimer);
@@ -54,7 +61,8 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     };
     const armSilence = () => { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => finish(), finalText ? silenceMs : Math.max(silenceMs * 3, 6000)); };
     // Só agora o navegador confirmou que está ouvindo de verdade.
-    rec.onstart = () => { active = true; micState('active'); bus.emit(EVENTS.LISTEN_STARTED); clientLog('ouvido', 'Escuta iniciada'); armSilence(); };
+    rec.onspeechstart = () => { outcome.speech = true; };
+    rec.onstart = () => { outcome.started = true; active = true; micState('active'); bus.emit(EVENTS.LISTEN_STARTED); clientLog('ouvido', 'Escuta iniciada'); armSilence(); };
     rec.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -67,6 +75,7 @@ export function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     };
     rec.onerror = (e) => {
       const msg = ERRORS[e.error];
+      outcome.error = e.error;
       if (e.error === 'no-speech' || e.error === 'aborted') return finish();
       clientLog(e.error === 'not-allowed' ? 'permissoes' : 'ouvido', `Erro no reconhecimento: ${e.error}`, 'warn');
       finish(new Error(msg || `Erro no reconhecimento de voz (${e.error}).`));
