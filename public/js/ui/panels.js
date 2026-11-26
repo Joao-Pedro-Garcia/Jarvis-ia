@@ -111,10 +111,19 @@ export async function showSettings({ onChange } = {}) {
       </fieldset>
       <fieldset class="fieldset"><legend>VOZ</legend>
         <label class="switch">Responder por voz <input type="checkbox" data-k="voice.enabled" ${s.voice.enabled ? 'checked' : ''}></label>
-        <div class="field"><label>Voz do JARVIS</label><select data-k="voice.engine"><option value="jarvis" ${s.voice.engine !== 'celular' ? 'selected' : ''}>Voz própria do JARVIS (masculina, natural)</option><option value="celular" ${s.voice.engine === 'celular' ? 'selected' : ''}>Voz do celular (Android)</option></select></div>
-        <div class="field"><label>Voz própria</label><select data-k="voice.neuralVoice">${(ttsInfo?.voices || [{ id: 'pt-BR-AntonioNeural', name: 'Antônio (português do Brasil)' }]).map((v) => `<option value="${esc(v.id)}" ${v.id === (s.voice.neuralVoice || ttsInfo?.defaultVoice || 'pt-BR-AntonioNeural') ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
-        <p class="hint">A voz própria precisa de internet e é gerada por um serviço gratuito e não oficial (o “Ler em voz alta” do Edge): o texto falado passa pela Microsoft. Sem internet, ${ttsInfo?.espeak ? 'o JARVIS usa a voz offline eSpeak (robótica)' : 'o JARVIS usa a voz do celular (para ter uma voz masculina offline, robótica: <b>pkg install espeak</b> no Termux)'}.</p>
-        <div class="field"><label>Voz do celular (reserva)</label><select data-k="voice.voiceName"><option value="">Automática (${esc(s.voice.lang)})</option>${voices.map((v) => `<option ${v.name === s.voice.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Voz do JARVIS</label><select data-k="voice.engine">${[['celular', 'Voz do celular (natural, funciona sem internet)'], ['neural', 'Voz neural online (experimental)'], ['espeak', 'Voz robótica offline (eSpeak)']].map(([v, l]) => `<option value="${v}" ${(['neural', 'espeak'].includes(s.voice.engine) ? s.voice.engine : 'celular') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <details class="hint voice-help"><summary><b>Como deixar a voz MASCULINA</b> (voz do celular)</summary>
+          <ol>
+            <li>Abra as <b>Configurações do Android</b> → <b>Configurações adicionais</b> → <b>Idiomas e entrada</b> → <b>Saída de texto para fala</b> (ou procure “texto para fala” na lupa das Configurações).</li>
+            <li>Em <b>Mecanismo preferido</b>, escolha <b>Serviços de fala do Google</b> (se não tiver, instale “Serviços de fala do Google” na Play Store).</li>
+            <li>Toque na <b>engrenagem ⚙</b> ao lado → <b>Instalar dados de voz</b> → <b>Português (Brasil)</b>.</li>
+            <li>Ouça as vozes (▶) e marque uma <b>masculina</b> — toque em baixar se pedir.</li>
+            <li>Volte aqui, <b>feche e abra o Chrome</b> e toque em <b>Testar voz</b>.</li>
+          </ol>
+        </details>
+        ${s.voice.engine === 'neural' ? `<div class="field"><label>Voz neural</label><select data-k="voice.neuralVoice">${(ttsInfo?.voices || [{ id: 'pt-BR-AntonioNeural', name: 'Antônio (português do Brasil)' }]).map((v) => `<option value="${esc(v.id)}" ${v.id === (s.voice.neuralVoice || 'pt-BR-AntonioNeural') ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <p class="hint">Experimental: serviço gratuito e não oficial do Edge; o texto falado passa pela Microsoft e o serviço pode recusar (403). Se falhar, usa a voz do celular.</p>` : ''}
+        <div class="field"><label>Voz do celular</label><select data-k="voice.voiceName"><option value="">Automática (${esc(s.voice.lang)})</option>${voices.map((v) => `<option ${v.name === s.voice.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Velocidade: <span data-out="voice.rate">${s.voice.rate}</span></label><input type="range" min="0.6" max="1.8" step="0.05" value="${s.voice.rate}" data-k="voice.rate" data-num></div>
         <div class="field"><label>Volume: <span data-out="voice.volume">${s.voice.volume}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.voice.volume}" data-k="voice.volume" data-num></div>
         <div class="field"><label>Idioma da voz e do ouvido</label><select data-k="voice.lang" data-mirror="hearing.lang">${['pt-BR', 'pt-PT', 'en-US', 'es-ES'].map((l) => `<option ${l === s.voice.lang ? 'selected' : ''}>${l}</option>`).join('')}</select></div>

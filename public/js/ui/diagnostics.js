@@ -212,10 +212,10 @@ export async function runSelfTest({ speakResult } = {}) {
     if (s.voice.silent) results.voz = { status: 'limited', detail: 'Modo silencioso ativo: reprodução não testada em áudio.' };
     else {
       // Voz própria do JARVIS (servidor) primeiro; a voz do navegador é a reserva.
-      const own = s.voice.engine === 'celular' ? null : await api.get(`/api/tts/test?voice=${encodeURIComponent(s.voice.neuralVoice || '')}`, { timeout: 15000 }).catch((e) => ({ ok: false, error: e.message }));
+      const own = s.voice.engine !== 'neural' ? null : await api.get(`/api/tts/test?voice=${encodeURIComponent(s.voice.neuralVoice || '')}`, { timeout: 15000 }).catch((e) => ({ ok: false, error: e.message }));
       const v = await testVoice();
-      if (own?.ok) results.voz = { status: 'ok', detail: `Voz própria do JARVIS funcionando (masculina, gerada em ${own.ms} ms). Reserva (voz do celular): ${v.detail}` };
-      else if (own) results.voz = { status: 'limited', detail: `Voz própria do JARVIS falhou: ${own.error}. ${own.espeak ? 'Reserva: eSpeak (offline, masculina).' : 'Falando com a voz do celular:'} ${v.detail}` };
+      if (own?.ok) results.voz = { status: 'ok', detail: `Voz neural funcionando ( gerada em ${own.ms} ms). Reserva (voz do celular): ${v.detail}` };
+      else if (own) results.voz = { status: 'limited', detail: `Voz neural falhou: ${own.error}. Falando com a voz do celular: ${v.detail}` };
       else results.voz = { status: v.status, detail: v.detail };
       results.voz.ms = Math.round(performance.now() - t0);
       tests.voz = { ...results.voz, at: new Date().toISOString() };

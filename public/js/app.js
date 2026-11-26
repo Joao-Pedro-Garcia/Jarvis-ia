@@ -75,7 +75,7 @@ function recentCommand(intent, module, ok = true) {
 let fallbackWarned = false;
 bus.on('voice:fallback', ({ reason } = {}) => {
   if (fallbackWarned) return; fallbackWarned = true;
-  addMsg('system', `⚠️ A voz própria do JARVIS não respondeu (${reason}). Falando com a voz do celular por enquanto. Detalhes: Configurações → VOZ → Testar voz.`);
+  addMsg('system', `⚠️ A voz escolhida não respondeu (${reason}). Falando com a voz do celular. Para voz masculina: Configurações → VOZ → “Como deixar a voz MASCULINA”.`);
 });
 /** Fala, com possibilidade de interrupção por "pare" (voz) ou duas palmas. */
 async function say(text) {
@@ -426,13 +426,14 @@ function applySettings(s, changedKey) {
   if (changedKey === 'voice.silent' && s.voice.silent) stopAll();
   if (changedKey === 'test-voice') {
     if (s.voice.silent) toast('Modo silencioso ativo.');
-    else if (s.voice.engine === 'celular') say('Olá. Esta é a voz do celular.');
+    else if (!['neural', 'espeak'].includes(s.voice.engine)) say('Olá. Esta é a minha voz atual.');
     else {
       // Testa de verdade a voz própria no servidor e diz o motivo se falhar.
-      toast('Testando a voz própria…');
+      toast('Testando a voz…');
+      if (s.voice.engine === 'espeak') { resetJarvisVoice(); say('Olá. Esta é a voz robótica offline.'); return; }
       api.get(`/api/tts/test?voice=${encodeURIComponent(s.voice.neuralVoice || '')}`).then((r) => {
-        if (r.ok) { resetJarvisVoice(); addMsg('system', `🔊 Voz própria funcionando (gerada em ${r.ms} ms).`); say('Olá, senhor. Esta é a minha voz.'); }
-        else { addMsg('system', `⚠️ Voz própria falhou: ${r.error}. ${r.espeak ? 'Usando a voz offline (eSpeak).' : 'Usando a voz do celular.'}`); say('Esta é a voz de reserva.'); }
+        if (r.ok) { resetJarvisVoice(); addMsg('system', `🔊 Voz neural funcionando (gerada em ${r.ms} ms).`); say('Olá, senhor. Esta é a minha voz.'); }
+        else { addMsg('system', `⚠️ Voz neural falhou: ${r.error}. Usando a voz do celular.`); say('Esta é a voz de reserva.'); }
       }).catch(() => { addMsg('system', '⚠️ Não consegui falar com o servidor do JARVIS para testar a voz.'); });
     }
   }

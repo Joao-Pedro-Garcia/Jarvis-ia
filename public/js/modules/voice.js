@@ -7,7 +7,7 @@ const synth = window.speechSynthesis;
 export const voiceSupported = !!synth || typeof Audio !== 'undefined';
 let voices = [];
 let speakingToken = 0;
-let opts = { rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', engine: 'jarvis', neuralVoice: '' };
+let opts = { rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', engine: 'celular', neuralVoice: '' };
 let lastPlayback = null; // última vez que o navegador CONFIRMOU o início de uma fala (evento onstart)
 export const lastPlaybackAt = () => lastPlayback;
 
@@ -55,12 +55,13 @@ let lastEngine = null;
 const urls = new Set();
 const player = () => (audioEl ||= new Audio());
 export const resetJarvisVoice = () => { serverDownUntil = 0; };
-export const usingJarvisVoice = () => opts.engine === 'jarvis' && Date.now() >= serverDownUntil;
+// 'neural' (experimental) ou 'espeak' (robótica). Qualquer outro valor = voz do celular.
+export const usingJarvisVoice = () => (opts.engine === 'neural' || opts.engine === 'espeak') && Date.now() >= serverDownUntil;
 
 async function fetchAudio(text) {
   const res = await fetch('/api/tts', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice: opts.neuralVoice || undefined, rate: opts.rate, pitch: opts.pitch }),
+    body: JSON.stringify({ text, voice: opts.neuralVoice || undefined, rate: opts.rate, pitch: opts.pitch, engine: opts.engine }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   lastEngine = res.headers.get('X-Voice-Engine') || 'neural';

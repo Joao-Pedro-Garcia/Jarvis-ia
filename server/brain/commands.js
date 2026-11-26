@@ -144,6 +144,22 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'voice.show', module: 'VOZ', priority: 90, description: 'Mostra a voz atual',
+  aliases: ['Mostre sua voz', 'Teste sua voz'],
+  patterns: [/\b(mostr\w+|test\w+|quero ouvir|deixa eu ouvir) (a )?(sua|tua) voz\b/, /\bcomo (e|eh) (a )?(sua|tua) voz\b/],
+  action: async () => say('Esta é a minha voz atual. Para trocar por uma voz masculina, abra Configurações, Voz, e veja como deixar a voz masculina.'),
+});
+
+registerCommand({
+  name: 'voice.male', module: 'VOZ', priority: 90, description: 'Como deixar a voz masculina',
+  aliases: ['Voz masculina', 'Mude sua voz'],
+  patterns: [/\bvoz (masculina|de homem|grossa|mais grave)\b/, /\b(mud\w+|troc\w+|alter\w+) (a )?(sua|tua) voz\b/],
+  action: async () => say('A voz vem do Android. Para deixar MASCULINA:\n1. Configurações do Android → Configurações adicionais → Idiomas e entrada → Saída de texto para fala.\n2. Mecanismo preferido: Serviços de fala do Google.\n3. Engrenagem ⚙ → Instalar dados de voz → Português (Brasil).\n4. Ouça as vozes (▶) e escolha uma masculina.\n5. Feche e abra o Chrome e diga "mostre sua voz".', {
+    speech: 'A voz vem do Android. Os passos para deixar masculina estão na tela.',
+  }),
+});
+
+registerCommand({
   name: 'system.silent_off', module: 'VOZ', priority: 95, description: 'Volta a falar', mutates: true,
   aliases: ['Volte a falar'],
   patterns: [/\b(volt\w+ a falar|pode falar|fal\w+ de novo|desativ\w+ (o )?modo silencioso|sair do modo silencioso|sai do silencio)\b/],

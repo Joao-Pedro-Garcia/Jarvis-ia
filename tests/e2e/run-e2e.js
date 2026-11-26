@@ -172,12 +172,11 @@ try {
     await page.keyboard.press('s');
     await page.waitForSelector('#test-voice');
     await page.click('#test-voice');
-    // Sem internet no teste: a voz própria falha, o motivo aparece e a voz de reserva fala.
-    await page.waitForFunction(() => window.__spoken.includes('Esta é a voz de reserva.'), null, { timeout: 20000 });
-    const why = await page.evaluate(() => [...document.querySelectorAll('#transcript .msg')].map((m) => m.textContent).find((t) => /Voz própria falhou/.test(t)) || '');
-    assert(why, 'motivo da falha da voz própria não apareceu');
+    await page.waitForFunction(() => window.__spoken.includes('Olá. Esta é a minha voz atual.'), null, { timeout: 20000 });
+    const help = await page.$('.voice-help');
+    assert(help, 'instruções da voz masculina ausentes');
     await closeSheets(page);
-    return `voz própria sem internet → reserva (síntese SIMULADA) · ${why.slice(0, 60)}`;
+    return 'voz do celular (síntese SIMULADA) · instruções da voz masculina presentes';
   });
   await step('6–7. Duas palmas (áudio real) → "Sim?" → pergunta por voz → resposta falada', async () => {
     await page.evaluate(() => window.__transcripts.push('Que horas são?'));

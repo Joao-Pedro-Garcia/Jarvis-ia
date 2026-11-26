@@ -112,11 +112,12 @@ Provedores online continuam suportados (`AI_PROVIDER=anthropic|openai`, chave s�
 mas **nenhuma função depende deles**. Para provedores novos, crie um arquivo em `server/brain/ai/`.
 
 ### Voz do JARVIS (masculina)
-Configurações → VOZ → **Voz do JARVIS**: *Voz própria* (padrão: **Antônio**, voz neural masculina) ou *Voz do celular*.
-A voz própria é gerada no servidor pelo serviço gratuito e **não oficial** do “Ler em voz alta” do Microsoft Edge:
-sem chave e sem cadastro, mas precisa de internet e o texto falado passa pela Microsoft. O próximo trecho é
-baixado enquanto o atual toca (sem pausas) e frases repetidas saem do cache. Se o serviço falhar, o JARVIS usa
-o eSpeak offline (voz robótica; `pkg install espeak` no Termux) ou a voz do celular — sozinho, sem travar.
+Padrão: **voz do celular** (natural e offline). Para ela ficar masculina, escolha no Android:
+Configurações → Idiomas e entrada → Saída de texto para fala → Serviços de fala do Google → ⚙ →
+Instalar dados de voz → Português (Brasil) → uma voz masculina (os passos também estão em Configurações → VOZ
+e no comando “voz masculina”). Opções extras em Configurações → VOZ: *voz neural online* (experimental,
+serviço não oficial do Edge — no teste real no celular foi recusada com HTTP 403) e *voz robótica offline*
+(eSpeak, `pkg install espeak`).
 
 ## 4. O que funciona offline e online
 
