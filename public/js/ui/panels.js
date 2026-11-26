@@ -95,6 +95,20 @@ export async function showSettings({ onChange } = {}) {
     const voices = listVoices(s.voice.lang);
     body.innerHTML = `
     <div class="form-grid">
+      <fieldset class="fieldset"><legend>INTELIGÊNCIA (IA)</legend>
+        <p class="hint" style="margin-top:0">Agora: <b>${esc(aiStatus?.state || 'IA INDISPONÍVEL')}</b>${aiStatus?.configured ? ` · ${esc(aiStatus.providerName)} · ${esc(aiStatus.model)}` : ' · modo local (comandos funcionam)'}${aiStatus?.fallback ? ` · reserva sem internet: ${esc(aiStatus.fallback.name)} · ${esc(aiStatus.fallback.model)}` : ''}</p>
+        <h4 class="h4">IA ONLINE GRATUITA — GROQ</h4>
+        <p class="hint">Responde em cerca de 1 segundo. Plano grátis, sem cartão.</p>
+        <ol class="hint groq-steps">
+          <li>No Chrome, abra <b>console.groq.com</b> e entre com sua conta Google.</li>
+          <li>Procure <b>API Keys</b> → <b>Create API Key</b>, dê o nome JARVIS e <b>copie a chave</b>.</li>
+          <li>Cole abaixo e toque em <b>Salvar e testar</b>.</li>
+        </ol>
+        <div class="groq-row"><input id="groq-key" class="inline-input" type="password" placeholder="Cole aqui a chave do Groq" autocomplete="off" spellcheck="false" aria-label="Chave do Groq"><button class="btn small" id="groq-save" type="button">Salvar e testar</button></div>
+        <p class="hint" id="groq-state">${online?.configured ? `🟢 Groq conectado · modelo <b>${esc(online.model)}</b>${online.source === 'env' ? ' (chave definida no .env do servidor)' : ''}` : '⚪ Groq não conectado.'}</p>
+        ${online?.configured && online.source === 'saved' ? '<button class="btn small" id="groq-remove" type="button">Remover chave do Groq</button>' : ''}
+        <p class="hint">A chave fica só no seu aparelho, criptografada, e nunca aparece de novo na tela. Com o Groq, as perguntas feitas à IA passam pelos servidores do Groq. Comandos, memória, Bíblia e tarefas continuam no aparelho. Sem internet ou no limite grátis, a IA do celular responde no lugar.</p>
+      </fieldset>
       <fieldset class="fieldset"><legend>VOZ</legend>
         <label class="switch">Responder por voz <input type="checkbox" data-k="voice.enabled" ${s.voice.enabled ? 'checked' : ''}></label>
         <div class="field"><label>Voz</label><select data-k="voice.voiceName"><option value="">Automática (${esc(s.voice.lang)})</option>${voices.map((v) => `<option ${v.name === s.voice.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
@@ -135,20 +149,6 @@ export async function showSettings({ onChange } = {}) {
       <fieldset class="fieldset"><legend>NOTIFICAÇÕES</legend>
         <p class="hint" style="margin-top:0">Estado: <b id="notif-state">${{ granted: 'permitidas', denied: 'bloqueadas no navegador', default: 'não solicitadas', unsupported: 'não suportadas neste navegador' }[notificationState()]}</b>. Lembretes são avisados enquanto o JARVIS estiver aberto (inclusive em segundo plano, se o navegador permitir). Com o app totalmente fechado, não há aviso — isso exigiria um servidor de push.</p>
         <button class="btn small" id="notif-btn" type="button" ${notificationState() === 'unsupported' ? 'disabled' : ''}>Permitir notificações</button>
-      </fieldset>
-      <fieldset class="fieldset"><legend>INTELIGÊNCIA (IA)</legend>
-        <p class="hint" style="margin-top:0">Agora: <b>${esc(aiStatus?.state || 'IA INDISPONÍVEL')}</b>${aiStatus?.configured ? ` · ${esc(aiStatus.providerName)} · ${esc(aiStatus.model)}` : ' · modo local (comandos funcionam)'}${aiStatus?.fallback ? ` · reserva sem internet: ${esc(aiStatus.fallback.name)} · ${esc(aiStatus.fallback.model)}` : ''}</p>
-        <h4 class="h4">IA ONLINE GRATUITA — GROQ</h4>
-        <p class="hint">Responde em cerca de 1 segundo. Plano grátis, sem cartão.</p>
-        <ol class="hint groq-steps">
-          <li>No Chrome, abra <b>console.groq.com</b> e entre com sua conta Google.</li>
-          <li>Procure <b>API Keys</b> → <b>Create API Key</b>, dê o nome JARVIS e <b>copie a chave</b>.</li>
-          <li>Cole abaixo e toque em <b>Salvar e testar</b>.</li>
-        </ol>
-        <div class="groq-row"><input id="groq-key" class="inline-input" type="password" placeholder="Cole aqui a chave do Groq" autocomplete="off" spellcheck="false" aria-label="Chave do Groq"><button class="btn small" id="groq-save" type="button">Salvar e testar</button></div>
-        <p class="hint" id="groq-state">${online?.configured ? `🟢 Groq conectado · modelo <b>${esc(online.model)}</b>${online.source === 'env' ? ' (chave definida no .env do servidor)' : ''}` : '⚪ Groq não conectado.'}</p>
-        ${online?.configured && online.source === 'saved' ? '<button class="btn small" id="groq-remove" type="button">Remover chave do Groq</button>' : ''}
-        <p class="hint">A chave fica só no seu aparelho, criptografada, e nunca aparece de novo na tela. Com o Groq, as perguntas feitas à IA passam pelos servidores do Groq. Comandos, memória, Bíblia e tarefas continuam no aparelho. Sem internet ou no limite grátis, a IA do celular responde no lugar.</p>
       </fieldset>
       <fieldset class="fieldset"><legend>BÍBLIA</legend>
         <div class="field"><label>Capítulos por dia</label><input type="number" min="1" max="20" value="${bible?.chaptersPerDay ?? 3}" id="b-cpd"></div>
