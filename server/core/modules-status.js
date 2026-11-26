@@ -45,7 +45,7 @@ export async function modulesStatus() {
   const m = (id, name, status, info, extra = {}) => ({ id, name, status, label: MODULE_LABEL[status] || status, info, last: last[id] || null, ...extra });
   const netDetail = net.state === 'online' ? `ONLINE · latência ${net.latencyMs} ms` : net.state === 'limited' ? `INTERNET LIMITADA · ${net.probes.filter((p) => p.ok).length}/${net.probes.length} pontos de teste responderam${net.latencyMs ? ` · latência ${net.latencyMs} ms` : ''}` : 'OFFLINE · nenhum ponto de teste respondeu — modo offline';
   const iaDetail = llmS.kind === 'local' ? `IA LOCAL — ${llmS.providerName} · modelo ${llmS.model} (gratuita, roda neste computador)`
-    : llmS.kind === 'online' ? `IA ONLINE — ${llmS.providerName} · ${llmS.model} (serviço externo opcional; pode ter custo)`
+    : llmS.kind === 'online' ? `IA ONLINE — ${llmS.providerName} · ${llmS.model} (${llmS.free ? 'plano gratuito; precisa de internet' : 'serviço externo opcional; pode ter custo'})${llmS.fallback ? ` · reserva sem internet: ${llmS.fallback.name} · ${llmS.fallback.model}` : ' · sem IA local de reserva'}`
     : `Não configurada. ${llmS.invalidProvider ? `AI_PROVIDER inválido: ${process.env.AI_PROVIDER}. ` : ''}${llmS.localProbe?.reason ? `Procurei IA local: ${llmS.localProbe.reason}. ` : ''}Modo local inteligente ativo: comandos, cálculos, memória e conversa básica funcionam. Para conversa livre gratuita, instale o Ollama (veja o README).`;
   const components = {
     cerebro: { status: 'ok', detail: `Orquestrador e comandos locais ativos (${llmS.configured ? llmS.state : 'modo local inteligente'})` },

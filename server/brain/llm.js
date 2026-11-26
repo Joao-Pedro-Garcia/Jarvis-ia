@@ -12,6 +12,7 @@ import { getSettings, updateSettings } from '../core/settings.js';
 import { anthropicProvider } from './ai/anthropic.js';
 import { openAICompatibleProvider } from './ai/openai-compatible.js';
 import { localProvider, detectLocal, localInfo, warmUp, benchmark as localBenchmark } from './ai/local.js';
+import { groqProvider, shouldFallback } from './ai/groq.js';
 
 /** Teste de velocidade da IA local (Ollama). */
 export const benchmark = (list) => localBenchmark(list);
@@ -70,7 +71,10 @@ export function providerId() {
 export function provider() {
   const id = providerId();
   if (id === 'none') return null;
-  if (id === 'auto' || id === 'local') return localProvider;
+  if (id === 'groq') return groqProvider;
+  // auto: com chave do Groq salva → Groq (rápido) com a IA do celular como reserva; sem chave → IA local.
+  if (id === 'auto') return groqProvider.configured() ? groqProvider : localProvider;
+  if (id === 'local') return localProvider;
   // "ollama" com modelo definido: endereço fixo (comportamento da v2.0).
   if (id === 'ollama') return process.env.AI_MODEL ? openAICompatibleProvider : localProvider;
   return CLOUD[id] || null;
@@ -99,7 +103,9 @@ export function status() {
     provider: p ? id : 'none',
     providerName: p ? (p.displayName?.() ?? p.name) : 'Nenhum',
     model: p?.model() ?? null,
-    free: k !== 'online',
+    free: k !== 'online' || !!p?.free,
+    // IA do celular pronta para assumir se a online falhar (sem internet, limite, fora do ar).
+    fallback: p && p !== localProvider && localInfo().detected ? { name: `IA local (${localInfo().detected.name})`, model: localInfo().detected.model } : null,
     webSearch: !!p?.capabilities.webSearch && process.env.JARVIS_WEB_SEARCH !== '0',
     lastError, lastOkAt,
     localProbe: (id === 'auto' || id === 'local' || (id === 'ollama' && !process.env.AI_MODEL)) ? { detected: info.detected && { name: info.detected.name, model: info.detected.model, models: info.detected.models.length }, lastCheck: info.lastProbe?.at || null, reason: info.lastProbe?.error || null } : null,
@@ -111,7 +117,14 @@ let probing = null;
 /** Para provedores locais: (re)detecta a IA local no máximo a cada 30 s. */
 export async function refresh({ force = false } = {}) {
   const p = provider();
-  if (p !== localProvider) return status();
+  if (p !== localProvider) {
+    // IA online principal: procura a IA do celular em silêncio (sem pré-carregar), só para servir de reserva.
+    if (p === groqProvider) {
+      const last = localInfo().lastProbe?.at;
+      if (force || !last || Date.now() - Date.parse(last) > 30000) { probing ??= detectLocal().finally(() => { probing = null; }); await probing; }
+    }
+    return status();
+  }
   const last = localInfo().lastProbe?.at;
   if (force || !last || Date.now() - Date.parse(last) > 30000) {
     probing ??= detectLocal().then((d) => {
@@ -141,6 +154,15 @@ export async function complete({ system, messages, maxTokens = 1500, effort, web
   } catch (err) {
     const msg = p.friendlyError(err);
     lastError = { message: msg, at: new Date().toISOString() };
+    // IA online falhou por internet/limite/queda → a IA do celular responde no lugar (não para JSON pesado).
+    if (p !== localProvider && !json && shouldFallback(err) && localProvider.configured()) {
+      log.warn('cerebro', `IA online indisponível (${msg}); respondendo com a IA local`);
+      try {
+        const out = await localProvider.complete({ system, messages, maxTokens: Math.min(maxTokens, 200), timeoutMs, onToken });
+        lastOkAt = new Date().toISOString();
+        return { ...out, via: 'local', onlineError: msg };
+      } catch (e2) { log.error('cerebro', `IA local (reserva) também falhou: ${localProvider.friendlyError(e2)}`); }
+    }
     log.error('cerebro', `Falha na IA (${p.id}): ${msg}`);
     bus.emitEvent(EVENTS.API_FAILURE, { service: 'ia', message: msg });
     bus.emitEvent(EVENTS.LLM_ERROR, { message: msg });

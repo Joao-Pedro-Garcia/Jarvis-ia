@@ -409,3 +409,8 @@ body:not(.asleep) .layout, body:not(.asleep) .dock { transition: opacity .8s eas
 .msg.live::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2, start) infinite; margin-left: 1px; }
 @keyframes blink { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .msg.live::after { animation: none; } }
+
+/* ---------- IA online gratuita (Groq) nas configurações ---------- */
+.groq-steps { margin: 6px 0 10px; padding-left: 20px; display: grid; gap: 4px; }
+.groq-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.groq-row .inline-input { flex: 1; min-width: 0; min-height: 40px; }

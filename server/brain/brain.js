@@ -96,7 +96,7 @@ async function converse(text, ctx, tone) {
   });
   const needsWeb = /\b(hoje|agora|atual\w*|ultim\w+|recente\w*|ontem|esta semana|resultado do jogo|placar|previsao do tempo|clima em|tempo em|preco d[eoa]|lancamento|quem ganhou)\b/.test(normalize(text));
   try {
-    const { text: answer } = await llm.complete({
+    const { text: answer, via, onlineError } = await llm.complete({
       system,
       // IA local: instruções fixas + histórico que só cresce → o Ollama lê só a mensagem nova.
       messages: isLocal ? [...localHistory(sess), { role: 'user', content: text }] : [...history(sess), { role: 'user', content: text }],
@@ -108,7 +108,8 @@ async function converse(text, ctx, tone) {
     let out = answer || 'Hmm, fiquei sem resposta agora. Pode repetir?';
     if (emergency && !/19[0-3]/.test(out)) out = `${emergency}\n\n${out}`;
     if (domain === 'motor' && /\b(barulho|ruido|falha|nao liga|nao pega|esquentando|superaquec\w+|fumaca|vazamento|cheiro|luz da injecao|engasga|trepida|vibra)\b/.test(normalize(text)) && !/inspe(c|ç)/i.test(out)) out += `\n\n${ENGINE_DISCLAIMER}`;
-    return moduleResult({ ...base, intent: domain ? `conversation.${domain}` : 'conversation', message: out, text: out, source: `${llm.status().state}: ${llm.status().providerName} (${llm.model()})` });
+    const source = via === 'local' ? `IA LOCAL (reserva — ${onlineError}): ${llm.status().fallback?.model || ''}` : `${llm.status().state}: ${llm.status().providerName} (${llm.model()})`;
+    return moduleResult({ ...base, intent: domain ? `conversation.${domain}` : 'conversation', message: out, text: out, source });
   } catch (err) {
     if (emergency) { const t = emergency; return moduleResult({ ...base, success: true, intent: 'conversation.urgent', message: t, text: t, source: 'local' }); }
     const r = localAnswer(text, ctx, tone, base, '', `Não consegui acessar a IA agora (${err.message}). Respondendo no modo local: `);

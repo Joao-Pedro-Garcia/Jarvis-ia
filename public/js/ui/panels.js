@@ -86,8 +86,9 @@ export async function showMemory(sessionHistory = []) {
 
 // ---------------- CONFIGURAÇÕES ----------------
 export async function showSettings({ onChange } = {}) {
-  const [s, personality, bible, booksRes, status] = await Promise.all([
+  const [s, personality, bible, booksRes, status, online] = await Promise.all([
     Promise.resolve(getSettings()), api.get('/api/personality').catch(() => null), api.get('/api/bible/settings').catch(() => null), api.get('/api/bible/books').catch(() => ({ books: [] })), api.get('/api/status').catch(() => null),
+    api.get('/api/ai/online').catch(() => null),
   ]);
   const aiStatus = status?.llm;
   openSheet('settings', 'CONFIGURAÇÕES', (body) => {
@@ -135,9 +136,19 @@ export async function showSettings({ onChange } = {}) {
         <p class="hint" style="margin-top:0">Estado: <b id="notif-state">${{ granted: 'permitidas', denied: 'bloqueadas no navegador', default: 'não solicitadas', unsupported: 'não suportadas neste navegador' }[notificationState()]}</b>. Lembretes são avisados enquanto o JARVIS estiver aberto (inclusive em segundo plano, se o navegador permitir). Com o app totalmente fechado, não há aviso — isso exigiria um servidor de push.</p>
         <button class="btn small" id="notif-btn" type="button" ${notificationState() === 'unsupported' ? 'disabled' : ''}>Permitir notificações</button>
       </fieldset>
-      <fieldset class="fieldset"><legend>IA ONLINE</legend>
-        <p class="hint" style="margin-top:0">Status: <b>${aiStatus?.configured ? 'CONFIGURADA' : 'NÃO CONFIGURADA'}</b>${aiStatus?.configured ? ` · Provedor: ${esc(aiStatus.providerName)} · Modelo: ${esc(aiStatus.model)}${aiStatus.webSearch ? ' · pesquisa web' : ''}` : ' · modo local (comandos funcionam; conversa livre não).'}</p>
-        <p class="hint">A chave nunca aparece aqui: ela fica só no servidor, no arquivo <code>.env</code> (AI_PROVIDER, AI_API_KEY, AI_MODEL). Veja o README.</p>
+      <fieldset class="fieldset"><legend>INTELIGÊNCIA (IA)</legend>
+        <p class="hint" style="margin-top:0">Agora: <b>${esc(aiStatus?.state || 'IA INDISPONÍVEL')}</b>${aiStatus?.configured ? ` · ${esc(aiStatus.providerName)} · ${esc(aiStatus.model)}` : ' · modo local (comandos funcionam)'}${aiStatus?.fallback ? ` · reserva sem internet: ${esc(aiStatus.fallback.name)} · ${esc(aiStatus.fallback.model)}` : ''}</p>
+        <h4 class="h4">IA ONLINE GRATUITA — GROQ</h4>
+        <p class="hint">Responde em cerca de 1 segundo. Plano grátis, sem cartão.</p>
+        <ol class="hint groq-steps">
+          <li>No Chrome, abra <b>console.groq.com</b> e entre com sua conta Google.</li>
+          <li>Procure <b>API Keys</b> → <b>Create API Key</b>, dê o nome JARVIS e <b>copie a chave</b>.</li>
+          <li>Cole abaixo e toque em <b>Salvar e testar</b>.</li>
+        </ol>
+        <div class="groq-row"><input id="groq-key" class="inline-input" type="password" placeholder="Cole aqui a chave do Groq" autocomplete="off" spellcheck="false" aria-label="Chave do Groq"><button class="btn small" id="groq-save" type="button">Salvar e testar</button></div>
+        <p class="hint" id="groq-state">${online?.configured ? `🟢 Groq conectado · modelo <b>${esc(online.model)}</b>${online.source === 'env' ? ' (chave definida no .env do servidor)' : ''}` : '⚪ Groq não conectado.'}</p>
+        ${online?.configured && online.source === 'saved' ? '<button class="btn small" id="groq-remove" type="button">Remover chave do Groq</button>' : ''}
+        <p class="hint">A chave fica só no seu aparelho, criptografada, e nunca aparece de novo na tela. Com o Groq, as perguntas feitas à IA passam pelos servidores do Groq. Comandos, memória, Bíblia e tarefas continuam no aparelho. Sem internet ou no limite grátis, a IA do celular responde no lugar.</p>
       </fieldset>
       <fieldset class="fieldset"><legend>BÍBLIA</legend>
         <div class="field"><label>Capítulos por dia</label><input type="number" min="1" max="20" value="${bible?.chaptersPerDay ?? 3}" id="b-cpd"></div>
@@ -178,6 +189,22 @@ export async function showSettings({ onChange } = {}) {
       const r = await testMicrophone({ onLevel: (v) => { $('#set-mic-level', body).style.width = `${Math.min(100, v * 160)}%`; } });
       toast(`${r.ok ? '🟢' : '🔴'} ${r.reason}`, 5000);
     });
+    $('#groq-save', body).addEventListener('click', async () => {
+      const input = $('#groq-key', body);
+      const key = input.value.trim();
+      if (!key) { toast('Cole a chave do Groq primeiro.'); input.focus(); return; }
+      const btn = $('#groq-save', body); btn.disabled = true; btn.textContent = 'Testando…';
+      try {
+        const r = await api.post('/api/ai/online', { key });
+        input.value = '';
+        $('#groq-state', body).innerHTML = `🟢 Groq conectado · modelo <b>${esc(r.model)}</b>. Pronto: a IA agora responde rápido.`;
+        toast('IA online (Groq) conectada.', 4000);
+      } catch (err) {
+        $('#groq-state', body).textContent = `🔴 ${err.message}`;
+      } finally { btn.disabled = false; btn.textContent = 'Salvar e testar'; }
+    });
+    const groqRemove = $('#groq-remove', body);
+    if (groqRemove) confirmButton(groqRemove, async () => { await api.del('/api/ai/online?confirm=true'); $('#groq-state', body).textContent = '⚪ Groq removido. A IA do celular volta a responder.'; groqRemove.remove(); }, 'Confirmar remoção?');
     $('#notif-btn', body).addEventListener('click', async () => {
       const r = await requestNotifications();
       $('#notif-state', body).textContent = { granted: 'permitidas', denied: 'bloqueadas no navegador', default: 'não solicitadas', unsupported: 'não suportadas' }[r];

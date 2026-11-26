@@ -32,7 +32,7 @@ export async function runSelfTest({ includeAI = true } = {}) {
       if (!st.configured) return { status: FAIL, detail: `IA INDISPONÍVEL — nenhuma IA local encontrada${st.localProbe?.reason ? ` (${st.localProbe.reason})` : ''}. Modo local inteligente ativo.` };
       if (!includeAI) return { status: OK, detail: `${st.state} — ${st.providerName} · ${st.model} (sem chamada de teste)` };
       // IA local: teste real e gratuito. IA online: só com ?ai=1 explícito (gasta tokens).
-      if (st.kind === 'online' && includeAI !== 'force') return { status: OK, detail: `${st.state} — ${st.providerName} · ${st.model} (configurada; teste real não executado para não gastar créditos)` };
+      if (st.kind === 'online' && !st.free && includeAI !== 'force') return { status: OK, detail: `${st.state} — ${st.providerName} · ${st.model} (configurada; teste real não executado para não gastar créditos)` };
       const p = await llm.ping();
       return { status: p.ok ? OK : LIMITED, detail: `${st.state} — ${st.providerName} · ${st.model} respondeu em ${p.ms} ms` };
     }),

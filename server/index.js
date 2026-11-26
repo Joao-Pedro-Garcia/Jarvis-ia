@@ -23,6 +23,7 @@ const llm = await import('./brain/llm.js');
 const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
 const chats = await import('./core/chats.js');
+const groq = await import('./brain/ai/groq.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -231,6 +232,23 @@ async function api(req, res, url) {
     }
     case 'GET /api/internet': return send(res, 200, await internetStatus({ force: url.searchParams.get('force') === '1' }));
     case 'GET /api/ai': return send(res, 200, await llm.refresh({ force: url.searchParams.get('force') === '1' }));
+    // IA online gratuita (Groq): a chave entra, é testada e fica criptografada no servidor (nunca volta para a tela).
+    case 'GET /api/ai/online': return send(res, 200, { configured: groq.groqProvider.configured(), source: groq.keySource(), model: groq.groqProvider.configured() ? groq.groqProvider.model() : null });
+    case 'POST /api/ai/online': {
+      if (rateLimited(ip, 'ai-key', 10)) return send(res, 429, { error: 'Muitas tentativas. Aguarde um instante.' });
+      const body = await readBody(req);
+      try {
+        const r = await groq.saveKey(body.key);
+        log.info('cerebro', `IA online (Groq) configurada · modelo ${r.model}`);
+        return send(res, 200, { ok: true, model: r.model, status: await llm.refresh({ force: true }) });
+      } catch (err) { return send(res, err.status || 400, { error: err.message }); }
+    }
+    case 'DELETE /api/ai/online': {
+      if (url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });
+      groq.removeKey();
+      log.info('cerebro', 'IA online (Groq) removida; voltando para a IA local');
+      return send(res, 200, { ok: true, status: await llm.refresh({ force: true }) });
+    }
     case 'GET /api/selftest': {
       if (rateLimited(ip, 'selftest', 6)) return send(res, 429, { error: 'Aguarde antes de repetir o diagnóstico.' });
       return send(res, 200, await selftest.runSelfTest({ includeAI: url.searchParams.get('ai') === '0' ? false : url.searchParams.get('ai') === '1' ? 'force' : true }));
