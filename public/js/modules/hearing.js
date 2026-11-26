@@ -51,8 +51,9 @@ let wAbort = null;
 export function configureStt({ enabled }) { sttEnabled = !!enabled; }
 export const usingWhisper = () => sttEnabled && Date.now() >= sttDownUntil && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
-async function listenWhisper({ silenceMs }) {
-  outcome = { started: false, speech: false, error: null, engine: 'whisper' };
+let wFinish = null;
+async function listenWhisper({ silenceMs, manual = false }) {
+  outcome = { started: false, speech: false, error: null, engine: 'whisper', manual };
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
@@ -83,6 +84,7 @@ async function listenWhisper({ silenceMs }) {
     let done = false;
     const end = (why) => { if (done) return; done = true; clearInterval(loop); resolve(why); };
     wAbort = () => end('abort');
+    wFinish = () => end('done'); // toque de novo no microfone: termina e ENVIA
     const loop = setInterval(() => {
       an.getFloatTimeDomainData(buf);
       let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -103,17 +105,21 @@ async function listenWhisper({ silenceMs }) {
         floor = floor * 0.97 + Math.min(rms, floor * 1.5) * 0.03;
         if (!outcome.speech) voiced = Math.max(0, voiced - 1);
       }
+      // Manual: só termina quando você tocar de novo (pausas no meio da fala não encerram).
+      if (manual) { if (elapsed > 180000) end('max'); return; }
       if (outcome.speech && now - lastVoice > Math.max(silenceMs, 1200)) end('silence');
       else if (!outcome.speech && elapsed > 8000) end('no-speech');
       else if (elapsed > 30000) end('max');
     }, 50);
   });
-  wAbort = null;
+  wAbort = null; wFinish = null;
+  const recordedMs = performance.now() - t0;
   await new Promise((r) => { recorder.onstop = r; try { recorder.stop(); } catch { r(); } });
   stream.getTracks().forEach((t) => t.stop());
   ctx.close().catch(() => {});
-  active = false;
-  micState('inactive');
+  micState('inactive'); // 'active' segue true até o texto chegar: um toque agora não abre outra escuta
+  // Manual: você tocou para enviar → manda mesmo se a voz foi baixa demais para o detector.
+  if (manual && stopped !== 'abort' && recordedMs > 700) outcome.speech = true;
   if (stopped === 'abort' || !outcome.speech) {
     if (!outcome.speech) outcome.error = 'no-speech';
     bus.emit(EVENTS.LISTEN_ENDED, { text: '' });
@@ -132,14 +138,22 @@ async function listenWhisper({ silenceMs }) {
   return text;
 }
 
-export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
+/** Toque de novo no microfone: termina a escuta e ENVIA o que foi dito (stopListening descarta). */
+export function finishListening() {
+  if (wFinish) { wFinish(); return true; }
+  if (rec && active) { manualStop = true; try { rec.stop(); } catch {} return true; }
+  return false;
+}
+let manualStop = false;
+
+export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800, manual = false } = {}) {
   if (usingWhisper()) {
     const hadWake = !!wakeRec;
     stopWake();
     if (active) stopListening();
     if (hadWake && MIC_RELEASE_MS) await waitMicRelease();
     try {
-      return await listenWhisper({ silenceMs });
+      return await listenWhisper({ silenceMs, manual });
     } catch (err) {
       active = false;
       if (!err.stt) throw err; // microfone negado etc.: mesmo erro para os dois modos
@@ -147,7 +161,7 @@ export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
       clientLog('ouvido', `Whisper indisponível (${err.message}); usando o reconhecimento do navegador`, 'warn');
       bus.emit('stt:fallback', { reason: err.message });
       return '';
-    } finally { resumeWake(); }
+    } finally { active = false; resumeWake(); }
   }
   if (!SR) throw new Error('Reconhecimento de voz não suportado neste navegador. Use Chrome, Edge ou o navegador do Android — ou digite.');
   const hadWake = !!wakeRec;
@@ -163,7 +177,8 @@ export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     let finalText = '';
     let heard = false; // já chegou algum texto parcial (fala baixa costuma demorar a virar texto final)
     let settled = false;
-    outcome = { started: false, speech: false, error: null };
+    manualStop = false;
+    outcome = { started: false, speech: false, error: null, manual };
     const finish = (err) => {
       if (settled) return; settled = true;
       clearTimeout(silenceTimer);
@@ -178,6 +193,7 @@ export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     // ainda sem texto final → espera mais; nada ainda → espera até 8 s antes de desistir.
     const armSilence = () => {
       clearTimeout(silenceTimer);
+      if (manual) { silenceTimer = setTimeout(() => finish(), 180000); return; } // manual: só o seu toque encerra (máx. 3 min)
       const wait = finalText ? silenceMs : heard || outcome.speech ? Math.max(silenceMs * 2, 3500) : Math.max(silenceMs * 4, 8000);
       silenceTimer = setTimeout(() => finish(), wait);
     };
@@ -198,17 +214,23 @@ export async function listenOnce({ lang = 'pt-BR', silenceMs = 1800 } = {}) {
     rec.onerror = (e) => {
       const msg = ERRORS[e.error];
       outcome.error = e.error;
+      if (manual && !manualStop && e.error === 'no-speech') return; // manual: segue ouvindo (onend reinicia)
       if (e.error === 'no-speech' || e.error === 'aborted') return finish();
       clientLog(e.error === 'not-allowed' ? 'permissoes' : 'ouvido', `Erro no reconhecimento: ${e.error}`, 'warn');
       finish(new Error(msg || `Erro no reconhecimento de voz (${e.error}).`));
     };
-    rec.onend = () => finish();
+    rec.onend = () => {
+      // Manual: o Android encerra sozinho depois de uma pausa — reabre e continua juntando o texto.
+      if (manual && !manualStop && !settled) { try { rec.start(); return; } catch { /* não reabriu: encerra */ } }
+      finish();
+    };
     try { rec.start(); } catch (err) { finish(err); }
   });
 }
 
 export function stopListening() {
   clearTimeout(silenceTimer);
+  manualStop = true; // cancelar de verdade (não reabrir no modo manual)
   if (wAbort) wAbort();
   if (rec) { try { rec.abort(); } catch {} }
   active = false;

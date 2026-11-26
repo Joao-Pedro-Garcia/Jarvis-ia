@@ -134,6 +134,8 @@ export async function showSettings({ onChange } = {}) {
         <button class="btn small" id="test-voice" type="button">Testar voz</button>
       </fieldset>
       <fieldset class="fieldset"><legend>MICROFONE / OUVIDO</legend>
+        <div class="field"><label>Quando terminar de ouvir (ao tocar no microfone)</label><select data-k="hearing.endMode"><option value="tap" ${s.hearing.endMode !== 'silence' ? 'selected' : ''}>Quando eu tocar de novo no microfone</option><option value="silence" ${s.hearing.endMode === 'silence' ? 'selected' : ''}>Sozinho, quando eu parar de falar</option></select></div>
+        <p class="hint">Pelas palmas ou pelo nome “Jarvis” (sem as mãos), ele sempre termina sozinho quando você para de falar.</p>
         <div class="field"><label>Transcrição da voz</label><select data-k="hearing.engine"><option value="auto" ${s.hearing.engine !== 'browser' ? 'selected' : ''}>Whisper pelo Groq (entende voz baixa; precisa da chave do Groq)</option><option value="browser" ${s.hearing.engine === 'browser' ? 'selected' : ''}>Reconhecimento do Google (do navegador)</option></select></div>
         <p class="hint">${online?.configured ? '🟢 Groq conectado: a sua voz é gravada aqui e transcrita pelo Whisper no Groq (o áudio passa pelos servidores do Groq).' : '⚪ Sem a chave do Groq, o JARVIS usa o reconhecimento do Google.'}</p>
         <label class="switch">Conversa contínua (ouve de novo após perguntas) <input type="checkbox" data-k="hearing.continuousConversation" ${s.hearing.continuousConversation ? 'checked' : ''}></label>

@@ -84,7 +84,7 @@ const INIT = () => {
         setTimeout(() => this.onend?.(), 50);
       }, 400);
     }
-    stop() { if (this.__wake) setTimeout(() => this.onend?.(), 10); } abort() { this.onend?.(); }
+    stop() { setTimeout(() => this.onend?.(), 10); } abort() { this.onend?.(); }
   }
   window.SpeechRecognition = FakeRecognition;
   window.webkitSpeechRecognition = FakeRecognition;
@@ -117,7 +117,11 @@ async function say(page, text) {
     await idle();
     if (await answered()) break;
     await page.evaluate((t) => { if (!window.__transcripts.includes(t)) window.__transcripts.push(t); }, text);
-    await page.click((await page.isVisible('#overlay')) ? '#sheet-mic' : '#mic-btn');
+    const micSel = (await page.isVisible('#overlay')) ? '#sheet-mic' : '#mic-btn';
+    await page.click(micSel);
+    // Toque para começar e toque de novo para enviar (como o usuário faz).
+    const heard = await page.waitForFunction((t) => !window.__transcripts.includes(t), text, { timeout: 4000 }).then(() => true, () => false);
+    if (heard) { await page.waitForTimeout(600); if (await page.evaluate(() => document.body.dataset.state === 'listening')) await page.click(micSel); }
     const ok = await page.waitForFunction(() => !!document.querySelector('.msg.jarvis:not([data-seen])') || document.body.dataset.state === 'thinking', null, { timeout: 8000 }).then(() => true, () => false);
     if (ok) break;
     if (attempt >= 3) throw new Error(`frase não ouvida após 3 tentativas: "${text}"`);

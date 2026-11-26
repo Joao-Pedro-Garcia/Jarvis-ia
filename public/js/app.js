@@ -7,7 +7,7 @@ import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
-import { holdWake, configureStt, listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
+import { finishListening, holdWake, configureStt, listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
 import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
@@ -288,14 +288,15 @@ function applyUi(res) {
 
 // ============================================================ ouvido
 let listenStarting = false;
-async function startListening({ chime = true, greet = null, quiet = false } = {}) {
+// manual: veio de um TOQUE no microfone → termina só quando você tocar de novo (configurável).
+async function startListening({ chime = true, greet = null, quiet = false, manual = false } = {}) {
   if (!hearingSupported) {
     addMsg('system', 'Reconhecimento de voz não suportado neste navegador. Digite seu comando no campo abaixo (para falar, use Chrome, Edge ou o navegador do Android).');
     $('#command-input').focus();
     return;
   }
   if (!window.isSecureContext) { addMsg('system', '⚠ O microfone exige HTTPS (ou localhost). Veja “Usar no Android” no README.'); return; }
-  if (isListening()) { stopListening(); setState('standby'); return; }
+  if (isListening()) { if (!finishListening()) { stopListening(); setState('standby'); } return; } // 2º toque: envia o que você falou
   // Trava: palmas + toque quase juntos não podem abrir duas escutas que disputam o microfone.
   if (listenStarting) return;
   listenStarting = true;
@@ -313,7 +314,9 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
   const s = getSettings();
   await ensureStt(s);
   try {
-    const listening = listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
+    const tapToEnd = manual && s?.hearing?.endMode !== 'silence';
+    if (tapToEnd) toast('🎙 Fale à vontade. Toque no microfone de novo para enviar.');
+    const listening = listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800, manual: tapToEnd });
     listenStarting = false; // a escuta já começou: um novo toque passa a encerrá-la
     const text = await listening;
     $('#interim').textContent = '';
@@ -499,10 +502,10 @@ $('#command-form').addEventListener('submit', (e) => {
   const v = input.value; input.value = '';
   handleInput(v, 'text');
 });
-for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
+for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening({ manual: true }));
 $('#core-button').addEventListener('click', () => {
   if (asleep) { wakeUp('toque'); greetOnWake(); return; }
-  return isSpeaking() || isPaused() ? stopAll('toque no núcleo') : startListening();
+  return isSpeaking() || isPaused() ? stopAll('toque no núcleo') : startListening({ manual: true });
 });
 $('#stop-btn').addEventListener('click', stopAll);
 $('#stop-speech').addEventListener('click', () => { stopAll('botão parar'); updateTopStatus(); });
@@ -629,7 +632,7 @@ document.addEventListener('keydown', (e) => {
   if (currentSheet() === 'bible' && (e.key === 'ArrowLeft' || e.key === 'PageUp')) { e.preventDefault(); bibleActions.prev(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (e.code === 'Space') { e.preventDefault(); startListening(); }
+  if (e.code === 'Space') { e.preventDefault(); startListening({ manual: true }); }
   else if (k === '/') { e.preventDefault(); $('#command-input').focus(); }
   else if (k === 'p') togglePause();
   else if (k === 'b') handleInput('Bíblia');
