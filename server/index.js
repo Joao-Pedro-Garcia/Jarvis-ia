@@ -327,6 +327,13 @@ export function createServer() {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'server', 'index.js')) {
   const { server, protocol } = createServer();
   tasks.startScheduler(Number(process.env.JARVIS_REMINDER_INTERVAL_MS) || 20000);
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  Já existe um JARVIS ligado na porta ${PORT} (talvez em outra sessão do Termux).\n  Desligue-o com:  pkill -f "node server/index.js"   e ligue de novo com:  jarvis\n`);
+      process.exit(1);
+    }
+    throw err;
+  });
   server.listen(PORT, HOST, async () => {
     bus.emitEvent(EVENTS.ASSISTANT_STARTED, {});
     const ai = await llm.refresh({ force: true }).catch(() => llm.status());

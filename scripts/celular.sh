@@ -49,6 +49,10 @@ main() {
     msg "Ollama não instalado: o JARVIS funciona no modo local. Para ter IA: pkg install ollama"
   fi
 
+  # 4) Um JARVIS antigo ainda ligado (outra sessão do Termux) prenderia a porta 3000
+  #    e o Chrome continuaria falando com a versão velha: desliga antes.
+  if pkill -f "node server/index.js" 2>/dev/null; then msg "Desliguei o JARVIS antigo que estava aberto."; sleep 1; fi
+
   msg "Abra no Chrome:  http://localhost:3000     (para desligar: CTRL + C)"
   AI_MODEL="$MODEL" exec node server/index.js
 }
