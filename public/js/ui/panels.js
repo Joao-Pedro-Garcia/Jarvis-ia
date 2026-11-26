@@ -180,6 +180,11 @@ export async function showSettings({ onChange } = {}) {
         <div class="field"><label>Detalhamento</label><select id="p-detail">${['baixo', 'medio', 'alto'].map((d) => `<option ${d === personality?.nivel_detalhamento ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
         <button class="btn small" id="p-save" type="button">Salvar personalidade</button>
       </fieldset>
+      <fieldset class="fieldset"><legend>BACKUP</legend>
+        <p class="hint" style="margin-top:0">Todo dia o JARVIS guarda uma cópia das memórias, tarefas, rotinas, conversas e configurações (últimos 14 dias). A chave do Groq não entra no backup.</p>
+        <div id="bk-list"><p class="hint">Carregando…</p></div>
+        <button class="btn small" id="bk-now" type="button">Fazer backup agora</button>
+      </fieldset>
       <fieldset class="fieldset"><legend>PRIVACIDADE E SEGURANÇA</legend>
         <label class="switch">Aprender sozinho com as conversas (memória automática) <input type="checkbox" data-k="privacy.autoMemory" ${s.privacy.autoMemory !== false ? 'checked' : ''}></label>
         <p class="hint">Com o Groq conectado, o JARVIS anota fatos que você conta sobre você (nome, trabalho, família, gostos, datas) e avisa com “🧠 Anotei”. Nunca guarda senhas, documentos, cartões, endereço ou telefone. Tudo aparece em Memória e pode ser apagado.</p>
@@ -201,6 +206,20 @@ export async function showSettings({ onChange } = {}) {
       });
     });
     $('#test-voice', body).addEventListener('click', () => onChange?.(getSettings(), 'test-voice'));
+    // Backup
+    const fmtKb = (b) => `${Math.max(1, Math.round(b / 1024))} KB`;
+    const loadBackups = async () => {
+      const box = $('#bk-list', body);
+      const d = await api.get('/api/backups').catch(() => null);
+      if (!d) { box.innerHTML = '<p class="hint">Não consegui ler os backups.</p>'; return; }
+      box.innerHTML = `${d.backups.length ? `<ul class="mem-list">${d.backups.slice(0, 5).map((b) => `<li data-name="${esc(b.name)}"><span class="t">${esc(new Date(b.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}${/antes-de-restaurar/.test(b.name) ? ' <span class="badge">ANTES DE RESTAURAR</span>' : ''} <small class="muted">${fmtKb(b.bytes)}</small></span><button class="btn small" data-restore>Restaurar</button></li>`).join('')}</ul>` : '<p class="hint">Nenhum backup ainda (o primeiro sai 1 minuto depois de ligar o JARVIS).</p>'}
+        <p class="hint">${d.external ? `🟢 Cópia também no armazenamento do celular: <b>Documentos/JARVIS-backups</b> (fica mesmo se o Termux for apagado).` : '⚪ Cópia só dentro do JARVIS. Para guardar também no armazenamento do celular, rode uma vez no Termux: <b>termux-setup-storage</b> e permita.'}</p>`;
+      box.querySelectorAll('li[data-name]').forEach((li) => confirmButton(li.querySelector('[data-restore]'), async () => {
+        try { const r = await api.post('/api/backups/restore?confirm=true', { name: li.dataset.name }); toast(`Backup restaurado (${r.restored} arquivo(s)). Recarregando…`); setTimeout(() => location.reload(), 1200); } catch (err) { toast(err.message); }
+      }, 'Restaurar? Toque de novo'));
+    };
+    loadBackups();
+    $('#bk-now', body).addEventListener('click', async () => { try { const r = await api.post('/api/backups', {}); toast(`Backup feito: ${r.files} arquivo(s).`); loadBackups(); } catch (err) { toast(err.message); } });
     $('#test-mic', body).addEventListener('click', async () => {
       const meter = $('#set-mic-meter', body); meter.hidden = false;
       const r = await testMicrophone({ onLevel: (v) => { $('#set-mic-level', body).style.width = `${Math.min(100, v * 160)}%`; } });
@@ -279,7 +298,7 @@ export async function showAgenda() {
     const routines = data.tasks.filter((t) => t.repeat);
     const once = data.tasks.filter((t) => !t.repeat && t.dueAt);
     const nextTxt = (t) => (t.dueAt ? new Date(t.dueAt).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
-    const item = (t) => `<li data-id="${t.id}"><span class="t"><b>${esc(t.text)}</b>${t.action && t.action !== 'lembrete' ? ` <span class="badge">${esc(actions[t.action] || t.action)}</span>` : ''}<br><small class="muted">${t.repeat ? `${esc(t.repeatLabel || '')} · próxima: ${nextTxt(t)}` : nextTxt(t)}</small></span><button class="btn small" data-del>Apagar</button></li>`;
+    const item = (t) => `<li data-id="${t.id}"><span class="t"><b>${esc(t.text)}</b>${t.action && t.action !== 'lembrete' && actions[t.action] !== t.text ? ` <span class="badge">${esc(actions[t.action] || t.action)}</span>` : ''}<br><small class="muted">${t.repeat ? `${esc(t.repeatLabel || '')} · próxima: ${nextTxt(t)}` : nextTxt(t)}</small></span><button class="btn small" data-del>Apagar</button></li>`;
     body.innerHTML = `
       <fieldset class="fieldset"><legend>NOVA ROTINA</legend>
         <div class="field"><label>O que fazer</label><select id="ag-action">${Object.entries(actions).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('')}</select></div>

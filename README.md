@@ -119,6 +119,21 @@ e no comando “voz masculina”). Opções extras em Configurações → VOZ: *
 serviço não oficial do Edge — no teste real no celular foi recusada com HTTP 403) e *voz robótica offline*
 (eSpeak, `pkg install espeak`).
 
+### Agenda · memória automática · pesquisa na internet · backup
+- **Agenda** (menu ⏰ ou voz): “todo dia às 7h me lembre de tomar o remédio”, “de segunda a sexta às 6h30 me dê
+  as notícias”, “toda segunda e quarta às 18h academia”. Ações: lembrete, notícias, clima, meu dia, Bíblia, dólar,
+  combustíveis. A rotina se reagenda sozinha; se o JARVIS estava desligado no horário, ela não dispara atrasada.
+  “Minhas rotinas” lista; “cancela a rotina 2” apaga (com confirmação).
+- **Memória automática** (Groq): depois de cada conversa, em segundo plano, anota fatos duradouros que você conta
+  (“🧠 Anotei: …”, marca APRENDIDO no painel Memória). Nunca guarda senhas, documentos, cartões, endereço,
+  telefone ou saúde detalhada. Desliga em Configurações → Privacidade.
+- **Pesquisa na internet** (Groq, modelos `groq/compound-mini`/`compound`): perguntas sobre fatos recentes
+  (resultados, preços, quem ganhou, eleições) pesquisam antes de responder; a origem mostra “pesquisou na
+  internet”. Se a pesquisa não estiver disponível, a IA é instruída a dizer que não conseguiu confirmar.
+- **Backup automático**: uma cópia por dia (14 dias) em `data/backups/auto/` e, se o Termux tiver acesso ao
+  armazenamento (`termux-setup-storage`), também em `Documentos/JARVIS-backups`. Sem a chave do Groq nem a chave de
+  criptografia. Restaurar em Configurações → BACKUP (com confirmação; o estado atual é guardado antes).
+
 ### Ouvido com Whisper (voz baixa e tom normal)
 Com a chave do Groq salva, a sua fala é gravada pelo próprio microfone da página e transcrita pelo **Whisper**
 (`whisper-large-v3-turbo`, gratuito no Groq, mesma chave). O fim da fala é detectado pelo silêncio, com limiar que

@@ -24,6 +24,7 @@ const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
 const chats = await import('./core/chats.js');
 const groq = await import('./brain/ai/groq.js');
+const backups = await import('./core/auto-backup.js');
 const tts = await import('./modules/voice/tts.js');
 const greeting = await import('./brain/greeting.js');
 const weather = await import('./modules/weather/weather.js');
@@ -274,6 +275,17 @@ async function api(req, res, url) {
     }
     // Voz do JARVIS: texto → áudio (MP3 da voz neural ou WAV do eSpeak). 503 = o navegador usa a voz do celular.
     // Bom dia criativo ao acordar (IA online se responder rápido; senão frases próprias) + clima real.
+    // Backup automático diário (sem as chaves) + restaurar com confirmação.
+    case 'GET /api/backups': return send(res, 200, { backups: backups.listBackups(), external: backups.externalDir() });
+    case 'POST /api/backups': {
+      if (rateLimited(ip, 'backup', 10)) return send(res, 429, { error: 'Aguarde um instante.' });
+      return send(res, 201, backups.makeBackup());
+    }
+    case 'POST /api/backups/restore': {
+      if (url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });
+      const body = await readBody(req);
+      try { return send(res, 200, backups.restoreBackup(body.name)); } catch (err) { return send(res, err.status || 500, { error: err.message }); }
+    }
     case 'GET /api/greeting': return send(res, 200, await greeting.wakeGreeting());
     case 'GET /api/weather': return send(res, 200, await weather.getWeather());
     // OUVIDO: transcrição Whisper no Groq (gratuita, mesma chave). Sem chave → 503 e o navegador usa o reconhecimento do Google.
@@ -383,6 +395,7 @@ export function createServer() {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'server', 'index.js')) {
   const { server, protocol } = createServer();
   tasks.startScheduler(Number(process.env.JARVIS_REMINDER_INTERVAL_MS) || 20000);
+  backups.startDailyBackup();
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n  Já existe um JARVIS ligado na porta ${PORT} (talvez em outra sessão do Termux).\n  Desligue-o com:  pkill -f "node server/index.js"   e ligue de novo com:  jarvis\n`);
