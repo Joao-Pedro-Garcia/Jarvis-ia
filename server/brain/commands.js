@@ -13,6 +13,7 @@ import { tryConvert } from '../modules/engineering/units.js';
 import { tryEngineCalc } from '../modules/engine/engine.js';
 import { solvePhysics } from '../../shared/physics.js';
 import { setMode } from './local-mind.js';
+import { bus, EVENTS } from '../core/events.js';
 import { formatTimeSpoken, formatDateLong } from '../core/time.js';
 import { parseOrdinal, normalize, recoverOriginal } from '../core/text.js';
 import { getSettings, updateSettings } from '../core/settings.js';
@@ -748,6 +749,35 @@ registerCommand({
     lines.push(`🖥 Sistema: ${ai.state}${ai.configured ? ` (${ai.providerName})` : ' — modo local inteligente ativo'}.`);
     const speech = `Revisão. ${all.length ? `Você tem ${all.length} tarefa${all.length > 1 ? 's' : ''} pendente${all.length > 1 ? 's' : ''}${t.overdue.length ? `, ${t.overdue.length} atrasada${t.overdue.length > 1 ? 's' : ''}` : ''}.` : 'Nenhuma tarefa pendente.'} ${bible?.plan ? (bible.plan.completedAt ? 'A leitura bíblica de hoje está concluída.' : `Leitura bíblica: ${bible.plan.label}, ${bible.plan.done} de ${bible.plan.total} capítulos.`) : ''}`;
     return say(lines.join('\n'), { speech: speech.trim(), data: { tasks: t, bible: bible?.plan || null } });
+  },
+});
+
+
+// ======================= IA LOCAL: TESTE DE VELOCIDADE =======================
+let benchmarkRunning = false;
+registerCommand({
+  name: 'ai.benchmark', module: 'SISTEMA', priority: 86, mutates: true, description: 'Testa a velocidade da IA local e escolhe os núcleos mais rápidos',
+  aliases: ['Teste a velocidade da IA', 'Otimizar a IA'],
+  patterns: [/\b(test\w*|med\w+|mede|meca|verific\w+) (a )?velocidade (da|do) (ia|jarvis|cerebro|inteligencia)\b/, /\b(otimiz\w+|acelera\w*|deixa\w* mais rapid\w+) (a )?(ia|jarvis)\b/, /^teste de velocidade$/],
+  action: async () => {
+    await llm.refresh().catch(() => {});
+    const st = llm.status();
+    if (st.kind !== 'local') return say('O teste de velocidade é para a IA local (Ollama), e ela não está ligada agora.');
+    if (benchmarkRunning) return say('O teste de velocidade já está rodando. Aviso aqui quando terminar.');
+    benchmarkRunning = true;
+    // Roda em segundo plano (com a IA lenta pode passar de 1 minuto) e avisa na tela ao terminar.
+    llm.benchmark([2, 4, 8]).then((r) => {
+      if (!r.best) return { text: `O teste falhou em todas as configurações: ${r.results.map((x) => `${x.threads} núcleos: ${x.error}`).join('; ')}.` };
+      updateSettings({ ai: { threads: r.best.threads } });
+      const lines = r.results.map((x) => (x.error ? `${x.threads} núcleos: falhou (${x.error})` : `${x.threads} núcleos: leitura ${x.promptRate} tokens/s · escrita ${x.evalRate} tokens/s · resposta típica ≈ ${x.estSeconds} s`));
+      return {
+        text: `Teste de velocidade da IA (${st.model}):\n${lines.join('\n')}\n\nMelhor: ${r.best.threads} núcleos (≈ ${r.best.estSeconds} s por resposta típica). Já salvei essa configuração.`,
+        speech: `Pronto. A IA fica mais rápida com ${r.best.threads} núcleos, cerca de ${Math.round(r.best.estSeconds)} segundos por resposta. Já salvei essa configuração.`,
+        best: r.best, results: r.results,
+      };
+    }).catch((err) => ({ text: `Não consegui fazer o teste de velocidade: ${err.message}.` }))
+      .then((payload) => { benchmarkRunning = false; bus.emitEvent(EVENTS.AI_BENCHMARK_DONE, payload); });
+    return say('Testando a velocidade da IA com 2, 4 e 8 núcleos do processador. Leva cerca de um minuto; aviso aqui quando terminar.');
   },
 });
 

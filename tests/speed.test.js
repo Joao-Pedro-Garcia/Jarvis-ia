@@ -99,3 +99,33 @@ test('cumprimentos e agradecimentos respondem na hora, sem chamar a IA (mesmo co
   assert.equal(chats, 1, 'pergunta de verdade vai para a IA');
   assert.equal(r.text, 'Resposta da IA.');
 });
+
+test('"teste a velocidade da IA": mede núcleos em segundo plano, escolhe o mais rápido, salva e passa a usar', async () => {
+  const { bus, EVENTS } = await import('../server/core/events.js');
+  const { getSettings } = await import('../server/core/settings.js');
+  // Simula um celular em que 4 núcleos é o mais rápido (núcleos lentos atrasam com 8).
+  const rate = { 2: 9, 4: 22, 8: 6 };
+  let chatBody;
+  mock = mockFetch([
+    ['127.0.0.1:11434/api/tags', () => jsonResponse({ models: [{ name: 'qwen2.5:0.5b' }] })],
+    ['127.0.0.1:11434/api/generate', (u, o) => {
+      const b = JSON.parse(o.body);
+      const t = b.options?.num_thread;
+      if (!b.prompt) return jsonResponse({ done: true });
+      return jsonResponse({ prompt_eval_count: 40, prompt_eval_duration: (40 / rate[t]) * 1e9, eval_count: 16, eval_duration: (16 / (rate[t] * 0.8)) * 1e9 });
+    }],
+    ['127.0.0.1:11434/api/chat', (u, o) => { chatBody = JSON.parse(o.body); return jsonResponse({ message: { content: 'ok' } }); }],
+  ]);
+  await llm.refresh({ force: true });
+  const done = new Promise((resolve) => bus.once(EVENTS.AI_BENCHMARK_DONE, (evt) => resolve(evt.payload)));
+  const t0 = Date.now();
+  const r = await processInput('teste a velocidade da IA', { sessionId: 'speed-bench' });
+  assert.ok(Date.now() - t0 < 300, 'responde na hora e testa em segundo plano');
+  assert.match(r.text, /Testando a velocidade/);
+  const payload = await done;
+  assert.equal(payload.best.threads, 4);
+  assert.match(payload.text, /Melhor: 4 núcleos/);
+  assert.equal(getSettings().ai.threads, 4);
+  await processInput('qual o maior oceano do mundo?', { sessionId: 'speed-bench-2' });
+  assert.equal(chatBody.options.num_thread, 4, 'conversa usa os núcleos escolhidos');
+});

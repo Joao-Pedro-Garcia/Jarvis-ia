@@ -10,7 +10,10 @@ import { log } from '../core/logger.js';
 import { bus, EVENTS } from '../core/events.js';
 import { anthropicProvider } from './ai/anthropic.js';
 import { openAICompatibleProvider } from './ai/openai-compatible.js';
-import { localProvider, detectLocal, localInfo, warmUp } from './ai/local.js';
+import { localProvider, detectLocal, localInfo, warmUp, benchmark as localBenchmark } from './ai/local.js';
+
+/** Teste de velocidade da IA local (Ollama). */
+export const benchmark = (list) => localBenchmark(list);
 
 const CLOUD = { anthropic: anthropicProvider, openai: openAICompatibleProvider, 'openai-compatible': openAICompatibleProvider };
 let lastError = null;

@@ -7,6 +7,7 @@
 // A detecção é real (consulta a lista de modelos instalados); se nada responder,
 // o JARVIS continua no modo local inteligente, sem fingir que há IA.
 import { chatCompletion } from './openai-compatible.js';
+import { getSettings } from '../../core/settings.js';
 
 const DEFAULT_CANDIDATES = [
   { name: 'Ollama', base: 'http://127.0.0.1:11434', list: '/api/tags', kind: 'ollama' },
@@ -76,7 +77,13 @@ export const localInfo = () => ({ detected, lastProbe });
 export const KEEP_ALIVE = '60m';
 export const NUM_CTX = 2048;
 /** Núcleos do processador para a IA (JARVIS_AI_THREADS). No celular, usar só os núcleos rápidos costuma ser mais veloz. */
-export const threads = () => { const n = Number(process.env.JARVIS_AI_THREADS); return Number.isInteger(n) && n > 0 && n <= 32 ? n : null; };
+export const threads = () => {
+  const ok = (n) => Number.isInteger(n) && n > 0 && n <= 32;
+  const env = Number(process.env.JARVIS_AI_THREADS);
+  if (ok(env)) return env;
+  const saved = Number(getSettings().ai?.threads);
+  return ok(saved) ? saved : null;
+};
 async function postJson(url, body, timeoutMs) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -104,11 +111,41 @@ async function ollamaChat({ system, messages, maxTokens, json, timeoutMs }) {
   return { text: text.trim() };
 }
 
+/**
+ * TESTE DE VELOCIDADE da IA local (Ollama): mede leitura e escrita com diferentes
+ * quantidades de núcleos e devolve a mais rápida. No celular, os núcleos lentos podem
+ * atrasar os rápidos, então nem sempre "todos os núcleos" é o melhor.
+ * Cada rodada usa um texto diferente no início para não aproveitar leitura anterior.
+ */
+export async function benchmark(list = [2, 4, 6, 8]) {
+  if (!detected || detected.kind !== 'ollama') throw new Error('o teste de velocidade funciona com o Ollama');
+  const prompt = 'Responda em uma frase curta: qual é a cor do céu num dia sem nuvens e por que ele tem essa cor?';
+  const results = [];
+  for (const t of list) {
+    try {
+      const d = await postJson(`${detected.base}/api/generate`, {
+        model: detected.model, prompt: `Teste ${t}. ${prompt}`, stream: false, keep_alive: KEEP_ALIVE,
+        options: { num_thread: t, num_predict: 16, num_ctx: NUM_CTX },
+      }, 120000);
+      const promptRate = d.prompt_eval_count / (d.prompt_eval_duration / 1e9);
+      const evalRate = d.eval_count / (d.eval_duration / 1e9);
+      if (!Number.isFinite(promptRate) || !Number.isFinite(evalRate)) throw new Error('resposta sem medições');
+      // Tempo estimado de uma resposta típica do JARVIS: ler ~40 tokens novos e escrever ~60.
+      results.push({ threads: t, promptRate: +promptRate.toFixed(1), evalRate: +evalRate.toFixed(1), estSeconds: +(40 / promptRate + 60 / evalRate).toFixed(1) });
+    } catch (err) {
+      results.push({ threads: t, error: err.message });
+    }
+  }
+  const valid = results.filter((r) => !r.error);
+  const best = valid.sort((a, b) => a.estSeconds - b.estSeconds)[0] || null;
+  return { results: results.sort((a, b) => a.threads - b.threads), best };
+}
+
 /** Carrega o modelo na memória logo ao iniciar (a primeira pergunta não espera). */
 export async function warmUp() {
   if (!detected || detected.kind !== 'ollama' || detected.warmed) return false;
   detected.warmed = true;
-  await postJson(`${detected.base}/api/generate`, { model: detected.model, keep_alive: KEEP_ALIVE }, 120000);
+  await postJson(`${detected.base}/api/generate`, { model: detected.model, keep_alive: KEEP_ALIVE, ...(threads() ? { options: { num_thread: threads() } } : {}) }, 120000);
   return true;
 }
 /** Usado pelos testes. */

@@ -630,6 +630,7 @@ async function boot() {
   serverEvents((evt) => {
     bus.emit(EVENTS.SERVER_EVENT, evt);
     if (evt.type === 'REMINDER_DUE') onReminder(evt);
+    if (evt.type === 'AI_BENCHMARK_DONE' && evt.payload?.text) { addMsg('jarvis', evt.payload.text, { tag: 'SISTEMA' }); if (evt.payload.speech) say(evt.payload.speech); }
     if (evt.type === 'MEMORY_UPDATED') refreshMemoryMini();
     if (['MEMORY_UPDATED', 'BIBLE_DAY_COMPLETED', 'NEWS_FETCHED', 'HOUSE_ACTION', 'LLM_ERROR'].includes(evt.type)) refreshStatus();
   });
