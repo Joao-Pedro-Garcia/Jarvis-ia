@@ -94,10 +94,28 @@ const INIT = () => {
 };
 
 async function say(page, text) {
-  await page.evaluate((t) => window.__transcripts.push(t), text);
-  const before = await page.evaluate(() => document.querySelectorAll('.msg.jarvis').length);
-  await page.click((await page.isVisible('#overlay')) ? '#sheet-mic' : '#mic-btn');
-  await page.waitForFunction((b) => document.querySelectorAll('.msg.jarvis').length > b, before, { timeout: 30000 });
+  // Marca as respostas já existentes e espera uma resposta NOVA (não depende da
+  // contagem, que não sobe quando a tela atinge o limite de mensagens).
+  await page.evaluate(() => document.querySelectorAll('.msg.jarvis').forEach((m) => { m.dataset.seen = '1'; }));
+  const answered = () => page.evaluate(() => !!document.querySelector('.msg.jarvis:not([data-seen])'));
+  // Só toca no microfone com o JARVIS realmente parado: sem falar, sem ouvir e sem
+  // "ativando microfone" (após uma pergunta ele volta a ouvir sozinho — conversa
+  // contínua — e um toque nessa hora encerra a escuta). O microfone falso também
+  // repete duas palmas a cada 6 s; se a frase não for ouvida, tenta de novo (até 3 vezes).
+  const idle = () => page.waitForFunction(() => document.body.dataset.state === 'standby'
+    && !/ATIVANDO/.test(document.getElementById('core-sub').textContent) && !window.speechSynthesis.speaking, null, { timeout: 30000 }).catch(() => {});
+  for (let attempt = 1; ; attempt++) {
+    await idle();
+    await page.waitForTimeout(150);
+    await idle();
+    if (await answered()) break;
+    await page.evaluate((t) => { if (!window.__transcripts.includes(t)) window.__transcripts.push(t); }, text);
+    await page.click((await page.isVisible('#overlay')) ? '#sheet-mic' : '#mic-btn');
+    const ok = await page.waitForFunction(() => !!document.querySelector('.msg.jarvis:not([data-seen])') || document.body.dataset.state === 'thinking', null, { timeout: 8000 }).then(() => true, () => false);
+    if (ok) break;
+    if (attempt >= 3) throw new Error(`frase não ouvida após 3 tentativas: "${text}"`);
+  }
+  await page.waitForFunction(() => !!document.querySelector('.msg.jarvis:not([data-seen])'), null, { timeout: 30000 });
   await page.waitForFunction(() => document.body.dataset.state !== 'thinking', null, { timeout: 30000 });
 }
 const lastJarvis = (page) => page.evaluate(() => [...document.querySelectorAll('.msg.jarvis')].pop()?.textContent || '');

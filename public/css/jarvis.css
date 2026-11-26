@@ -375,11 +375,31 @@ body.asleep .core-wrap { opacity: .85; transition: opacity .8s ease; }
 body:not(.asleep) .layout, body:not(.asleep) .dock { transition: opacity .8s ease; }
 @media (prefers-reduced-motion: reduce) { body.asleep .layout, body.asleep .dock, body.asleep .core-wrap { transition: none; } }
 
-/* ---------- conversas por categoria ---------- */
-.conv-cats { display: grid; gap: 8px; }
-.conv-cat { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: var(--text); display: grid; gap: 3px; cursor: pointer; }
-.conv-cat small { color: var(--muted); font: 10px var(--mono); }
-.conv-list { display: grid; gap: 8px; margin: 10px 0; }
-.conv-msg { margin: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
-.conv-msg.user { border-color: rgba(var(--accent-rgb), .35); }
-.conv-msg small { display: block; color: var(--muted); font: 10px var(--mono); margin-bottom: 3px; }
+/* ---------- conversas (gaveta lateral, estilo ChatGPT) ---------- */
+.chats-btn { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: var(--accent); cursor: pointer; }
+.chats-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.chats-btn:hover, .chats-btn:focus-visible { border-color: var(--line-strong); outline: none; box-shadow: 0 0 0 2px rgba(var(--accent-rgb), .35); }
+.drawer-backdrop { position: fixed; inset: 0; z-index: 46; background: rgba(1, 5, 10, .6); }
+.drawer { position: fixed; top: 0; bottom: 0; left: 0; z-index: 47; width: min(330px, 88vw); display: flex; flex-direction: column; gap: 10px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px)) calc(14px + env(safe-area-inset-left, 0px));
+  background: var(--glass-strong); border-right: 1px solid var(--line-strong); box-shadow: 8px 0 40px rgba(0,0,0,.5); backdrop-filter: blur(14px); animation: slide-in .22s ease; }
+@keyframes slide-in { from { transform: translateX(-100%); } to { transform: none; } }
+.drawer-h { display: flex; align-items: center; justify-content: space-between; font: 600 12px var(--mono); letter-spacing: .24em; color: var(--accent); }
+.new-chat { min-height: 44px; border-radius: 12px; border: 1px solid var(--line-strong); background: rgba(var(--accent-rgb), .08); color: var(--text); font: 600 14px var(--sans); cursor: pointer; text-align: left; padding: 0 14px; }
+.new-chat:hover, .new-chat:focus-visible { background: rgba(var(--accent-rgb), .16); outline: none; }
+.chat-search { width: 100%; }
+.chat-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-f { font: 600 10px var(--mono); letter-spacing: .06em; padding: 5px 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.chip-f.on { color: var(--accent); border-color: var(--accent); }
+.chat-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
+.chat-list h5 { margin: 12px 6px 4px; font: 600 10px var(--mono); letter-spacing: .16em; color: var(--muted); text-transform: uppercase; }
+.chat-item { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
+.chat-item:hover, .chat-item.active { background: rgba(var(--accent-rgb), .08); }
+.chat-item.active .chat-open b { color: var(--accent); }
+.chat-open { flex: 1; min-width: 0; min-height: 44px; text-align: left; padding: 7px 8px; border: 0; background: transparent; color: var(--text); cursor: pointer; display: grid; gap: 1px; border-radius: 10px; }
+.chat-open b { font: 500 14px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-open small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .icon-btn { flex: none; min-width: 34px; height: 34px; opacity: .7; }
+.chat-item .icon-btn:hover, .chat-item .icon-btn:focus-visible { opacity: 1; }
+.chat-del.armed { min-width: 72px; color: #ffd0d8; border-color: rgba(255,77,109,.6); opacity: 1; font: 600 11px var(--sans); }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }

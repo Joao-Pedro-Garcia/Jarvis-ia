@@ -13,8 +13,8 @@ import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
-import { $, $$, esc, toast, relTime, fmtDateTime, confirmButton } from './ui/dom.js';
-import { closeSheet, currentSheet, openSheet } from './ui/sheet.js';
+import { $, $$, esc, toast, relTime } from './ui/dom.js';
+import { closeSheet, currentSheet } from './ui/sheet.js';
 import { showBible, renderBibleMini, bibleActions, pageSize } from './ui/bible-reader.js';
 import { showNews, showStory } from './ui/news-panel.js';
 import { showMemory, showSettings, showModules, showHouse, showMenu } from './ui/panels.js';
@@ -34,7 +34,17 @@ let statusTimer = null;
 // ============================================================ transcrição
 function addMsg(role, text, { tag, confirm } = {}) {
   const box = $('#transcript');
+  // Avisos de sistema repetidos em sequência (ex.: palmas em ambiente barulhento)
+  // viram uma linha só com contador, em vez de encher a tela.
+  const prev = box.lastElementChild;
+  if (role === 'system' && prev?.classList.contains('system') && prev.dataset.text === text) {
+    const n = Number(prev.dataset.count || 1) + 1;
+    prev.dataset.count = String(n);
+    prev.textContent = `${text} ×${n}`;
+    return;
+  }
   const p = document.createElement('p');
+  if (role === 'system') p.dataset.text = text;
   p.className = `msg ${role}`;
   p.textContent = text;
   if (tag) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = tag; p.appendChild(t); }
@@ -131,7 +141,9 @@ async function handleInput(text, source = 'text') {
   const t0 = performance.now();
   let res;
   try {
-    res = await api.post('/api/input', { text, sessionId, pageSize: pageSize(), source, client: clientInfo() }, { timeout: 90000 });
+    res = await api.post('/api/input', { text, sessionId, chatId, pageSize: pageSize(), source, client: clientInfo() }, { timeout: 90000 });
+    if (res?.chatId && res.chatId !== chatId) setChat(res.chatId);
+    if (!$('#drawer').hidden) renderChats();
     if (!serverReachable) { serverReachable = true; updateBanner(); }
   } catch (err) {
     busy = false;
@@ -387,36 +399,109 @@ $('#core-button').addEventListener('click', () => {
 $('#stop-btn').addEventListener('click', stopAll);
 $('#stop-speech').addEventListener('click', () => { stopAll(); updateTopStatus(); });
 $('#pause-btn').addEventListener('click', togglePause);
-// ============================================================ conversas por categoria
-async function showConversations(catId = null) {
-  openSheet('conversas', 'CONVERSAS', async (body) => {
-    body.innerHTML = '<p class="muted">Carregando…</p>';
-    if (!catId) {
-      const { categories } = await api.get('/api/conversations');
-      body.innerHTML = categories.length
-        ? `<div class="conv-cats">${categories.map((c) => `<button class="conv-cat" data-cat="${esc(c.id)}"><b>${esc(c.label)}</b><small>${c.count} mensagens · última: ${fmtDateTime(c.last)}</small></button>`).join('')}</div>`
-        : '<p class="muted">Nenhuma conversa salva ainda. Cada assunto vai para a sua categoria assim que você falar comigo.</p>';
-      body.querySelectorAll('.conv-cat').forEach((b) => b.addEventListener('click', () => showConversations(b.dataset.cat)));
-    } else {
-      const { items } = await api.get(`/api/conversations?category=${encodeURIComponent(catId)}`);
-      body.innerHTML = `<div class="diag-actions"><button class="btn small" id="conv-back">← Categorias</button></div>
-        <div class="conv-list">${items.map((m) => `<p class="conv-msg ${m.role}"><small>${fmtDateTime(m.at)} · ${m.role === 'user' ? 'VOCÊ' : 'JARVIS'}</small>${esc(m.text)}</p>`).join('') || '<p class="muted">Vazio.</p>'}</div>
-        <div class="diag-actions"><button class="btn" id="conv-clear">Apagar esta categoria</button></div>`;
-      body.querySelector('#conv-back').addEventListener('click', () => showConversations());
-      confirmButton(body.querySelector('#conv-clear'), async () => {
-        await api.del(`/api/conversations?category=${encodeURIComponent(catId)}&confirm=true`);
-        showConversations();
-      }, 'Confirmar?');
-    }
-  });
+// ============================================================ conversas (estilo ChatGPT)
+// Cada conversa tem título e fica salva no servidor (data/chats.json).
+let chatId = (() => { try { return localStorage.getItem('jarvis.chat') || null; } catch { return null; } })();
+let chatFilter = '';
+let chatQuery = '';
+function setChat(id) { chatId = id || null; try { if (chatId) localStorage.setItem('jarvis.chat', chatId); else localStorage.removeItem('jarvis.chat'); } catch {} }
+function groupOf(iso) {
+  const d = new Date(iso); const t = new Date(); t.setHours(0, 0, 0, 0);
+  const days = Math.round((t - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  return days <= 0 ? 'Hoje' : days === 1 ? 'Ontem' : days < 7 ? 'Últimos 7 dias' : days < 30 ? 'Últimos 30 dias' : 'Mais antigas';
 }
+function openDrawer() {
+  $('#drawer').hidden = false; $('#drawer-backdrop').hidden = false;
+  $('#chats-btn').setAttribute('aria-expanded', 'true');
+  renderChats();
+  setTimeout(() => $('#new-chat').focus(), 50);
+}
+function closeDrawer() {
+  $('#drawer').hidden = true; $('#drawer-backdrop').hidden = true;
+  $('#chats-btn').setAttribute('aria-expanded', 'false');
+}
+async function renderChats() {
+  const list = $('#chat-list');
+  let data;
+  try {
+    const qs = new URLSearchParams({ ...(chatFilter ? { category: chatFilter } : {}), ...(chatQuery ? { q: chatQuery } : {}) });
+    data = await api.get(`/api/chats?${qs}`);
+  } catch (e) { list.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  $('#chat-filters').innerHTML = data.categories.length > 1 || chatFilter
+    ? [`<button type="button" class="chip-f ${!chatFilter ? 'on' : ''}" data-f="">Todas</button>`, ...data.categories.map((c) => `<button type="button" class="chip-f ${chatFilter === c.id ? 'on' : ''}" data-f="${esc(c.id)}">${esc(c.label)}</button>`)].join('') : '';
+  if (!data.chats.length) { list.innerHTML = `<p class="muted">${chatQuery || chatFilter ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda. Fale comigo e ela aparece aqui com um título.'}</p>`; return; }
+  let html = ''; let last = null;
+  for (const c of data.chats) {
+    const g = groupOf(c.updatedAt);
+    if (g !== last) { html += `<h5>${g}</h5>`; last = g; }
+    html += `<div class="chat-item ${c.id === chatId ? 'active' : ''}"><button type="button" class="chat-open" data-id="${esc(c.id)}"><b>${esc(c.title)}</b><small>${esc(c.preview)}</small></button><button type="button" class="icon-btn chat-ren" data-id="${esc(c.id)}" aria-label="Renomear “${esc(c.title)}”" title="Renomear">✎</button><button type="button" class="icon-btn chat-del" data-id="${esc(c.id)}" aria-label="Apagar “${esc(c.title)}”" title="Apagar">🗑</button></div>`;
+  }
+  list.innerHTML = html;
+}
+function showChatMessages(c) {
+  $('#transcript').innerHTML = '';
+  history.length = 0;
+  for (const m of c.messages) addMsg(m.role === 'user' ? 'user' : 'jarvis', m.text, { tag: m.role === 'user' ? undefined : (m.tag || undefined) });
+}
+async function openChat(id) {
+  try {
+    const c = await api.get(`/api/chats/${id}`);
+    stopAll();
+    setChat(c.id);
+    showChatMessages(c);
+    addMsg('system', `Conversa “${c.title}” aberta.`);
+    closeDrawer();
+  } catch (e) { toast(e.message); }
+}
+function newChat() {
+  stopAll();
+  setChat(null);
+  $('#transcript').innerHTML = '';
+  history.length = 0;
+  addMsg('jarvis', 'Nova conversa. Como posso ajudar?', { tag: 'SISTEMA' });
+  closeDrawer();
+  $('#command-input').focus();
+}
+/** Ao abrir o JARVIS, a última conversa volta para a tela. */
+async function restoreChat() {
+  if (!chatId) return;
+  try { showChatMessages(await api.get(`/api/chats/${chatId}`)); }
+  catch (e) { if (e.status === 404) setChat(null); }
+}
+$('#chats-btn').addEventListener('click', () => ($('#drawer').hidden ? openDrawer() : closeDrawer()));
+$('#drawer-close').addEventListener('click', closeDrawer);
+$('#drawer-backdrop').addEventListener('click', closeDrawer);
+$('#new-chat').addEventListener('click', newChat);
+let searchTimer = null;
+$('#chat-search').addEventListener('input', (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { chatQuery = e.target.value.trim(); renderChats(); }, 250); });
+$('#drawer').addEventListener('click', async (e) => {
+  const f = e.target.closest('.chip-f'); if (f) { chatFilter = f.dataset.f; renderChats(); return; }
+  const o = e.target.closest('.chat-open'); if (o) { openChat(o.dataset.id); return; }
+  const rn = e.target.closest('.chat-ren');
+  if (rn) {
+    const cur = rn.closest('.chat-item').querySelector('b').textContent;
+    const t = window.prompt('Novo título da conversa:', cur);
+    if (t && t.trim()) { try { await api.patch(`/api/chats/${rn.dataset.id}`, { title: t.trim() }); renderChats(); } catch (err) { toast(err.message); } }
+    return;
+  }
+  const del = e.target.closest('.chat-del');
+  if (del) {
+    if (!del.dataset.armed) { del.dataset.armed = '1'; del.textContent = 'Apagar?'; del.classList.add('armed'); setTimeout(() => { if (del.isConnected) { delete del.dataset.armed; del.textContent = '🗑'; del.classList.remove('armed'); } }, 4000); return; }
+    try {
+      await api.del(`/api/chats/${del.dataset.id}?confirm=true`);
+      if (del.dataset.id === chatId) newChat(); else renderChats();
+      toast('Conversa apagada.');
+    } catch (err) { toast(err.message); }
+  }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#drawer').hidden) { e.stopImmediatePropagation(); closeDrawer(); } }, true);
 
 const PANELS = {
-  conversas: () => showConversations(),
+  conversas: () => openDrawer(),
   memory: () => showMemory(history), settings: openSettings, diagnostics: showDiagnostics, modules: showModules, house: showHouse,
   menu: () => showMenu({
     bible: () => handleInput('Bíblia'), news: () => handleInput('Notícias'), memory: () => showMemory(history), modules: showModules, house: showHouse, settings: openSettings, diagnostics: showDiagnostics,
-    conversas: () => showConversations(),
+    conversas: () => { closeSheet(); openDrawer(); },
     clap: () => { const s = getSettings(); saveSettings({ clap: { enabled: !s.clap.enabled } }).then((n) => applySettings(n, 'clap.enabled')); closeSheet(); },
     stop: () => { stopAll(); closeSheet(); },
   }),
@@ -527,6 +612,7 @@ async function boot() {
   if (serverReachable) {
     api.get(`/api/bible?pageSize=${pageSize()}`, { timeout: 20000 }).then(renderBibleMini).catch(() => {});
     refreshMemoryMini();
+    restoreChat();
   }
   serverEvents((evt) => {
     bus.emit(EVENTS.SERVER_EVENT, evt);

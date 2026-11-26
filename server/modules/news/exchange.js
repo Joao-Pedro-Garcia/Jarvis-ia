@@ -40,7 +40,7 @@ async function ptax(code) {
   const end = new Date();
   const start = new Date(Date.now() - 7 * 86400000);
   const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoMoedaPeriodo(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)?@moeda='${code}'&@dataInicial='${mmddyyyy(start)}'&@dataFinalCotacao='${mmddyyyy(end)}'&$format=json&$orderby=dataHoraCotacao%20desc&$top=20`;
-  const res = await fetchWithTimeout(url, { timeout: 10000 });
+  const res = await fetchWithTimeout(url, { timeout: 7000 });
   const data = await res.json();
   const rows = (data.value || []).filter((r) => r.tipoBoletim === 'Fechamento' || r.tipoBoletim === 'Fechamento PTAX');
   const row = rows[0] || data.value?.[0];
@@ -67,7 +67,7 @@ export function parseFrankfurter(json) {
   }));
 }
 async function frankfurter() {
-  const res = await fetchWithTimeout('https://api.frankfurter.app/latest?from=BRL&to=USD,EUR,GBP', { timeout: 8000 });
+  const res = await fetchWithTimeout('https://api.frankfurter.app/latest?from=BRL&to=USD,EUR,GBP', { timeout: 7000 });
   return parseFrankfurter(await res.json());
 }
 
@@ -81,20 +81,23 @@ function ok(rates, source, note, health) {
 export async function getExchange() {
   return cached('exchange', TTL, async () => {
     try {
-      const res = await fetchWithTimeout('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,GBP-BRL', { timeout: 8000 });
+      const res = await fetchWithTimeout('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,GBP-BRL', { timeout: 6000 });
       const rates = parseAwesome(await res.json());
       if (rates.length !== 3) throw new Error('resposta incompleta');
       return ok(rates, 'AwesomeAPI', null, 'ok');
     } catch (err) {
       log.warn('noticias', `AwesomeAPI falhou (${err.message}); usando PTAX do Banco Central`);
     }
-    const results = await Promise.allSettled(Object.keys(CURRENCIES).map(ptax));
-    const rates = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+    // Reservas consultadas AO MESMO TEMPO (resposta rápida mesmo com fontes fora);
+    // a preferência continua: PTAX do Banco Central primeiro, BCE depois.
+    const [ptaxResults, ecbResult] = await Promise.all([
+      Promise.allSettled(Object.keys(CURRENCIES).map(ptax)),
+      frankfurter().then((v) => ({ ok: true, v }), (err) => ({ ok: false, err })),
+    ]);
+    const rates = ptaxResults.filter((r) => r.status === 'fulfilled').map((r) => r.value);
     if (rates.length) return ok(rates, 'PTAX do Banco Central (AwesomeAPI fora)', 'Cotação comercial indisponível; exibindo PTAX do Banco Central.', 'limited');
-    try {
-      const ecb = await frankfurter();
-      if (ecb.length) return ok(ecb, 'BCE/Frankfurter (AwesomeAPI e PTAX fora)', 'Cotação comercial e PTAX indisponíveis; exibindo a taxa de referência diária do Banco Central Europeu.', 'limited');
-    } catch (err) { log.warn('noticias', `Frankfurter falhou (${err.message})`); }
+    if (ecbResult.ok && ecbResult.v.length) return ok(ecbResult.v, 'BCE/Frankfurter (AwesomeAPI e PTAX fora)', 'Cotação comercial e PTAX indisponíveis; exibindo a taxa de referência diária do Banco Central Europeu.', 'limited');
+    if (!ecbResult.ok) log.warn('noticias', `Frankfurter falhou (${ecbResult.err.message})`);
     const last = load(LAST_FILE, {});
     setHealth('cambio', 'fail', `Nenhuma fonte de câmbio respondeu${last.savedAt ? ` · último valor em cache de ${last.savedAt}` : ''}`);
     return {

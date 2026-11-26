@@ -227,7 +227,7 @@ export async function showHouse() {
 // ---------------- MENU (celular) ----------------
 export function showMenu(handlers) {
   openSheet('menu', 'MENU', (body) => {
-    const items = [['📖', 'Bíblia', 'bible'], ['📰', 'Notícias', 'news'], ['🧠', 'Memória', 'memory'], ['🧩', 'Módulos', 'modules'], ['🏠', 'Casa', 'house'], ['⚙️', 'Configurações', 'settings'], ['🩺', 'Diagnóstico', 'diagnostics'], ['👏', 'Palmas on/off', 'clap'], ['🔇', 'Parar fala', 'stop']];
+    const items = [['📖', 'Bíblia', 'bible'], ['📰', 'Notícias', 'news'], ['🧠', 'Memória', 'memory'], ['🧩', 'Módulos', 'modules'], ['🏠', 'Casa', 'house'], ['⚙️', 'Configurações', 'settings'], ['🩺', 'Diagnóstico', 'diagnostics'], ['💬', 'Conversas', 'conversas'], ['👏', 'Palmas on/off', 'clap'], ['🔇', 'Parar fala', 'stop']];
     body.innerHTML = `<div class="menu-grid">${items.map(([i, l, k]) => `<button data-k="${k}"><span>${i}</span>${l}</button>`).join('')}</div>`;
     $$('[data-k]', body).forEach((b) => b.addEventListener('click', () => handlers[b.dataset.k]?.()));
   });

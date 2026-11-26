@@ -19,6 +19,7 @@
   <div class="bg-vignette" aria-hidden="true"></div>
 
   <header class="topbar">
+    <button class="chats-btn" id="chats-btn" type="button" aria-label="Abrir conversas" title="Conversas" aria-controls="drawer" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" /><circle cx="20" cy="20" r="9" /><path d="M20 3v6M20 31v6M3 20h6M31 20h6" /></svg>
       <div>
@@ -79,7 +80,7 @@
         <button data-say="Que horas são?">⏱ Hora</button>
         <button data-open="memory">🧠 Memória</button>
         <button data-say="Modo dormir">💤 Dormir</button>
-        <button data-open="conversas">🗂 Conversas</button>
+        <button data-open="conversas">💬 Conversas</button>
       </nav>
     </section>
 
@@ -129,6 +130,16 @@
       <div class="sheet-body" id="sheet-body"></div>
     </section>
   </div>
+
+  <!-- Conversas salvas (gaveta lateral, estilo ChatGPT) -->
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="drawer" id="drawer" aria-label="Conversas" hidden>
+    <header class="drawer-h"><span>CONVERSAS</span><button class="icon-btn" id="drawer-close" type="button" aria-label="Fechar conversas">✕</button></header>
+    <button class="new-chat" id="new-chat" type="button">＋ Nova conversa</button>
+    <input id="chat-search" class="inline-input chat-search" type="search" placeholder="Procurar conversa…" aria-label="Procurar conversa" autocomplete="off">
+    <div class="chat-filters" id="chat-filters"></div>
+    <nav class="chat-list" id="chat-list" aria-label="Lista de conversas"></nav>
+  </aside>
 
   <div class="toast" id="toast" role="status" hidden></div>
   <div class="banner" id="banner" role="status" hidden></div>

@@ -22,7 +22,7 @@ const house = await import('./modules/house/house.js');
 const llm = await import('./brain/llm.js');
 const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
-const conversations = await import('./core/conversations.js');
+const chats = await import('./core/chats.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -142,20 +142,16 @@ async function api(req, res, url) {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       const body = await readBody(req);
       const client = body.client && typeof body.client === 'object' ? { mic: String(body.client.mic || '').slice(0, 20), hearing: body.client.hearing !== false, voice: body.client.voice !== false, notifications: String(body.client.notifications || '').slice(0, 20) } : {};
-      const out = await processInput(body.text, { sessionId: String(body.sessionId || 'default').slice(0, 64), pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client });
-      conversations.record(String(body.text || '').trim(), out);
-      return send(res, 200, out);
+      // Cada conversa tem a sua memória de sessão (a IA lembra o que foi dito nela).
+      const chatId = chats.validId(body.chatId) ? body.chatId : chats.newId();
+      const sessionKey = `chat-${chatId}`;
+      const sess = memory.session(sessionKey);
+      if (!sess.history.length) for (const h of chats.historyFor(chatId)) memory.pushHistory(sess, h.role, h.content);
+      const out = await processInput(body.text, { sessionId: sessionKey, pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client });
+      const chat = chats.append(chatId, String(body.text || '').trim(), out);
+      return send(res, 200, { ...out, chatId, chatTitle: chat?.title || null });
     }
-    case 'GET /api/conversations': {
-      const cat = url.searchParams.get('category');
-      if (cat) return send(res, 200, { category: cat, items: conversations.getCategory(cat) });
-      return send(res, 200, { categories: conversations.listCategories() });
-    }
-    case 'DELETE /api/conversations': {
-      const cat = url.searchParams.get('category');
-      if (!cat || url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });
-      return send(res, 200, { removed: conversations.clearCategory(cat) });
-    }
+    case 'GET /api/chats': return send(res, 200, { chats: chats.list({ category: url.searchParams.get('category') || null, q: url.searchParams.get('q') || '' }), categories: chats.categoriesInUse() });
     case 'GET /api/events': {
       res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write(': conectado\n\n');
@@ -238,6 +234,14 @@ async function api(req, res, url) {
   }
   // rotas com parâmetro
   let m;
+  if ((m = url.pathname.match(/^\/api\/chats\/([0-9a-f-]{36})$/))) {
+    if (req.method === 'GET') { const c = chats.get(m[1]); return c ? send(res, 200, c) : send(res, 404, { error: 'Conversa não encontrada' }); }
+    if (req.method === 'PATCH') { const c = chats.rename(m[1], (await readBody(req)).title); return c ? send(res, 200, c) : send(res, 400, { error: 'Título inválido' }); }
+    if (req.method === 'DELETE') {
+      if (url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });
+      return chats.remove(m[1]) ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Conversa não encontrada' });
+    }
+  }
   if ((m = url.pathname.match(/^\/api\/memory\/([\w-]{36})$/))) {
     if (req.method === 'PATCH') { const item = memory.updateItem(m[1], await readBody(req)); return item ? send(res, 200, item) : send(res, 404, { error: 'Não encontrada' }); }
     if (req.method === 'DELETE') { const item = memory.remove(m[1]); return item ? send(res, 200, item) : send(res, 404, { error: 'Não encontrada' }); }
