@@ -95,21 +95,22 @@ async function converse(text, ctx, tone) {
     context: [bibleCtx, sess.context.activeModule === 'news' ? 'O painel de notícias está aberto.' : ''].filter(Boolean).join(' '),
     now: `${formatDateLong()}, ${formatTimeSpoken().text} (fuso ${process.env.JARVIS_TIMEZONE || 'America/Araguaina'})`,
   });
-  const needsWeb = /\b(hoje|agora|atual\w*|ultim\w+|recente\w*|ontem|esta semana|resultado do jogo|placar|previsao do tempo|clima em|tempo em|preco d[eoa]|lancamento|quem ganhou)\b/.test(normalize(text));
+  const needsWeb = /\b(hoje|agora|atual\w*|ultim\w+|recente\w*|ontem|esta semana|este mes|este ano|resultado|jogo d[eoa]|placar|tabela d[eoa]|campeonato|previsao do tempo|clima em|tempo em|preco d[eoa]|quanto custa|lancamento|lancou|quem ganhou|eleic\w+|morreu|faleceu|pesquis\w+|procur\w+ na internet|na internet|no google)\b/.test(normalize(text));
+  const webAllowed = getSettings().privacy.allowWebSearch;
   try {
-    const { text: answer, via, onlineError } = await llm.complete({
-      system,
+    const { text: answer, via, onlineError, searched } = await llm.complete({
+      system: needsWeb && !webAllowed && !isLocal ? `${system}\nA pesquisa na internet está desligada pelo usuário: se a pergunta depender de fatos recentes, diga que não consegue confirmar e não invente.` : system,
       // IA local: instruções fixas + histórico que só cresce → o Ollama lê só a mensagem nova.
       messages: isLocal ? [...localHistory(sess), { role: 'user', content: text }] : [...history(sess), { role: 'user', content: text }],
       maxTokens: isLocal ? (tone.mode === 'estudo' || domain ? 200 : 110) : tone.mode === 'estudo' || domain ? 2500 : 1200,
       effort: domain || tone.mode === 'estudo' ? 'medium' : undefined,
-      webSearch: needsWeb && getSettings().privacy.allowWebSearch,
+      webSearch: needsWeb && webAllowed,
       onToken: ctx.onToken,
     });
     let out = answer || 'Hmm, fiquei sem resposta agora. Pode repetir?';
     if (emergency && !/19[0-3]/.test(out)) out = `${emergency}\n\n${out}`;
     if (domain === 'motor' && /\b(barulho|ruido|falha|nao liga|nao pega|esquentando|superaquec\w+|fumaca|vazamento|cheiro|luz da injecao|engasga|trepida|vibra)\b/.test(normalize(text)) && !/inspe(c|ç)/i.test(out)) out += `\n\n${ENGINE_DISCLAIMER}`;
-    const source = via === 'local' ? `IA LOCAL (reserva — ${onlineError}): ${llm.status().fallback?.model || ''}` : `${llm.status().state}: ${llm.status().providerName} (${llm.model()})`;
+    const source = via === 'local' ? `IA LOCAL (reserva — ${onlineError}): ${llm.status().fallback?.model || ''}` : `${llm.status().state}: ${llm.status().providerName} (${llm.model()})${searched ? ' · pesquisou na internet' : ''}`;
     return moduleResult({ ...base, intent: domain ? `conversation.${domain}` : 'conversation', message: out, text: out, source });
   } catch (err) {
     if (emergency) { const t = emergency; return moduleResult({ ...base, success: true, intent: 'conversation.urgent', message: t, text: t, source: 'local' }); }

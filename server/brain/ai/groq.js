@@ -60,19 +60,47 @@ export async function saveKey(k) {
   return { model, models: ids.length };
 }
 
-export function removeKey() { save(FILE, {}); chosen = null; }
+export function removeKey() { save(FILE, {}); chosen = null; searchIds = null; }
+
+// ---------- Pesquisa na internet (modelos "compound" do Groq) ----------
+export const SEARCH_MODELS = () => [...new Set([process.env.GROQ_SEARCH_MODEL, 'groq/compound-mini', 'groq/compound', 'compound-beta-mini', 'compound-beta'].filter(Boolean))];
+let searchIds = null; // modelos de pesquisa disponíveis na conta (null = ainda não consultado)
+let searchCheckedAt = 0;
+async function searchModel() {
+  if (process.env.JARVIS_WEB_SEARCH === '0') return null;
+  if (searchIds === null || Date.now() - searchCheckedAt > 6 * 3600e3) {
+    try { const ids = await listModels(key(), 5000); searchIds = SEARCH_MODELS().filter((m) => ids.includes(m)); searchCheckedAt = Date.now(); } catch { return SEARCH_MODELS()[0]; }
+  }
+  return searchIds[0] || null;
+}
+export const resetSearch = () => { searchIds = null; };
 
 export const groqProvider = {
   id: 'groq',
   name: 'Groq (gratuito)',
   free: true,
-  capabilities: { webSearch: false, json: true },
+  capabilities: { webSearch: true, json: true },
   configured: () => !!key(),
   model() { return process.env.GROQ_MODEL || chosen || load(FILE, {}).groq?.model || PREFERRED[0]; },
-  async complete({ system, messages, maxTokens, json, timeoutMs }) {
+  async complete({ system, messages, maxTokens, json, timeoutMs, webSearch = false }) {
+    // Pergunta sobre fatos recentes: modelo "compound" do Groq, que pesquisa na internet antes de responder.
+    if (webSearch && !json) {
+      const sm = await searchModel();
+      if (sm) {
+        try {
+          const out = await chatCompletion({ endpoint: `${GROQ_BASE}/chat/completions`, key: key(), model: sm, system, messages, maxTokens: Math.min(maxTokens, 1500), timeoutMs: Math.min(timeoutMs, 30000) });
+          return { ...out, searched: true, searchModel: sm };
+        } catch (err) {
+          if (err.status === 404 || (err.status === 400 && /model/i.test(err.message))) searchIds = []; // modelo de pesquisa saiu da conta
+        }
+      }
+      // Sem pesquisa agora: responde com o modelo normal, avisado para NÃO inventar fatos recentes.
+      system = `${system}\nATENÇÃO: a pesquisa na internet não está disponível agora. Se a pergunta depender de fatos recentes (resultados, preços, notícias, quem ganhou), diga claramente que não conseguiu confirmar na internet agora e não invente.`;
+    }
     const call = () => chatCompletion({ endpoint: `${GROQ_BASE}/chat/completions`, key: key(), model: this.model(), system, messages, maxTokens, json, timeoutMs: Math.min(timeoutMs, 25000) });
     try {
-      return await call();
+      const out = await call();
+      return webSearch ? { ...out, searched: false } : out;
     } catch (err) {
       // Modelo retirado pelo Groq: escolhe outro disponível e tenta de novo (uma vez).
       if ((err.status === 404 || err.status === 400) && /model/i.test(err.message)) {
