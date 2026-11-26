@@ -79,10 +79,15 @@ bus.on('voice:fallback', ({ reason } = {}) => {
 });
 /** Fala, com possibilidade de interrupção por "pare" (voz) ou duas palmas. */
 let speechClapHold = 0;
+let lastSpoken = { text: '', at: 0 };
+const normTxt = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+/** O microfone pegou a PRÓPRIA voz do JARVIS (fim da fala no alto-falante)? */
+const isEcho = (t) => { const n = normTxt(t); return n.length >= 6 && Date.now() - lastSpoken.at < 20000 && normTxt(lastSpoken.text).includes(n); };
 async function say(text) {
   const s = getSettings();
   if (!text || !s?.voice?.enabled || s.voice.silent) return;
   setState('speaking');
+  lastSpoken = { text, at: Date.now() };
   holdWake(true); // a escuta do "Jarvis" cortaria a fala no Android
   // O detector de palmas ouviria a PRÓPRIA voz do JARVIS no alto-falante ("p", "t" parecem
   // palmas) e cortaria a fala no meio: fica pausado enquanto ele fala.
@@ -167,8 +172,8 @@ async function greetOnWake() {
   const h = new Date().getHours();
   const nome = lastStatus?.personality?.nome_usuario;
   let g = null;
-  try { g = await api.get('/api/greeting', { timeout: 4000 }); } catch { /* servidor fora: saudação simples */ }
-  const text = g?.text || `${h >= 5 && h < 12 ? 'Bom dia' : h < 18 && h >= 12 ? 'Boa tarde' : 'Boa noite'}${nome ? `, ${nome}` : ''}! Sistemas prontos. Como posso ajudar?`;
+  try { g = await api.get('/api/greeting', { timeout: 1500 }); } catch { /* servidor fora: saudação simples */ }
+  const text = g?.text || `${h >= 5 && h < 12 ? 'Bom dia' : h < 18 && h >= 12 ? 'Boa tarde' : 'Boa noite'}${nome ? `, ${nome}` : ''}! O que vai ser hoje?`;
   addMsg('jarvis', text, { tag: 'SISTEMA' });
   await say(text);
   if (!asleep && !busy && !isListening()) startListening({ chime: true, quiet: 'silence' });
@@ -325,6 +330,7 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
       }
       return;
     }
+    if (isEcho(text)) { clientLog('ouvido', 'Transcrição descartada: era a própria voz do JARVIS'); setState('standby'); return; }
     clientLog('ouvido', `Transcrição recebida (${text.length} caracteres)`);
     bus.emit(EVENTS.VOICE_RECEIVED, { text });
     await handleInput(text, 'voice');

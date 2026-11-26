@@ -80,32 +80,10 @@ test('sem internet e sem dados: diz que não conseguiu (não inventa)', () => {
   assert.match(stale, /não consegui atualizar agora/);
 });
 
-test('bom dia ao acordar (sem IA online): saudação + frase própria + clima real + ajuda', async () => {
-  const g = await greeting.wakeGreeting();
-  assert.match(g.text, /^(Bom dia|Boa tarde|Boa noite)/);
-  assert.match(g.text, /Lá fora, em Araguaína, faz 31 graus com parcialmente nublado; máxima de 34 e 70% de chance de chuva\./);
-  assert.match(g.text, /Como posso ajudar\?$/);
-  assert.equal(g.source, 'local');
-  assert.ok(!/\{n\}/.test(g.text));
-});
-
-test('frases próprias não se repetem duas vezes seguidas', () => {
-  for (let i = 0; i < 30; i++) assert.notEqual(greeting.localLine('manha', 'Lucas'), greeting.localLine('manha', 'Lucas'));
-  assert.ok(!/\{n\}|, \?|, \./.test(greeting.localLine('tarde', '')));
-});
-
-test('com IA online (Groq): frase criativa da IA no bom dia', async () => {
-  const llm = await import('../server/brain/llm.js');
-  const groqMod = await import('../server/brain/ai/groq.js');
-  const { save } = await import('../server/core/store.js');
-  const { encrypt } = await import('../server/core/secrets.js');
-  save('ai-online', { groq: { key: encrypt('gsk_teste1234567890abcdefghijKLMN'), model: 'llama-3.1-8b-instant' } });
-  groq = () => new Response(JSON.stringify({ choices: [{ message: { content: '"Hoje os reatores estão em potência máxima, Lucas."' } }] }), { headers: { 'content-type': 'application/json' } });
-  await llm.refresh({ force: true });
-  assert.equal(llm.kind(), 'online');
-  const g = await greeting.wakeGreeting();
-  assert.equal(g.source, 'ia');
-  assert.match(g.text, /Hoje os reatores estão em potência máxima, Lucas\. Lá fora/);
-  groqMod.removeKey();
-  await llm.refresh({ force: true });
+test('bom dia ao acordar: curto, só pergunta o que vai ser hoje (sem clima nem outros assuntos)', async () => {
+  const g = await greeting.wakeGreeting({ now: new Date('2026-11-26T10:00:00-03:00') });
+  assert.equal(g.text, 'Bom dia! O que vai ser hoje?');
+  assert.equal((await greeting.wakeGreeting({ now: new Date('2026-11-26T15:00:00-03:00') })).text, 'Boa tarde! O que vai ser hoje?');
+  assert.equal((await greeting.wakeGreeting({ now: new Date('2026-11-26T21:00:00-03:00') })).text, 'Boa noite! O que vai ser hoje?');
+  assert.equal(calls.length, 0, 'não busca clima nem chama IA');
 });

@@ -187,9 +187,9 @@ try {
     await closeSheets(page);
     return 'voz do celular (síntese SIMULADA) · instruções da voz masculina presentes';
   });
-  await step('6–7. Dormindo → duas palmas (áudio real) acordam → bom dia criativo → pergunta por voz → resposta', async () => {
+  await step('6–7. Dormindo → duas palmas (áudio real) acordam → bom dia curto → pergunta por voz → resposta', async () => {
     await page.evaluate(() => window.__transcripts.push('Que horas são?'));
-    await page.waitForFunction(() => window.__spoken.some((s) => /^(Bom dia|Boa tarde|Boa noite).*Como posso ajudar\?$/.test(s)), null, { timeout: 20000 });
+    await page.waitForFunction(() => window.__spoken.some((s) => /^(Bom dia|Boa tarde|Boa noite)(, [^!]+)?! O que vai ser hoje\?$/.test(s)), null, { timeout: 20000 });
     assert(!(await page.evaluate(() => document.body.classList.contains('asleep'))), 'continuou dormindo');
     await page.waitForFunction(() => window.__spoken.some((s) => /^Agora são/.test(s)), null, { timeout: 15000 })
       .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} · falado: ${JSON.stringify(await page.evaluate(() => window.__spoken.slice(-6)))} · tela: ${(await page.evaluate(() => document.getElementById('transcript').textContent.slice(-300))).replace(/\s+/g, ' ')}`); });

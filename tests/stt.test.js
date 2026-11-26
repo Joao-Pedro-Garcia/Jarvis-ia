@@ -42,6 +42,7 @@ test('com chave: envia o áudio ao Whisper em português e devolve o texto', asy
     const fd = o.body;
     assert.equal(fd.get('model'), 'whisper-large-v3-turbo');
     assert.equal(fd.get('language'), 'pt');
+    assert.equal(fd.get('prompt'), null, 'sem dica: o Whisper devolvia a dica como se fosse a fala');
     assert.equal(fd.get('file').name, 'fala.webm');
     assert.equal(fd.get('file').size, AUDIO.length);
     return json({ text: ' Jarvis, como está o dia hoje? ' });
@@ -63,7 +64,7 @@ test('modelo retirado → usa o outro Whisper', async () => {
 });
 
 test('frases inventadas pelo Whisper em silêncio são descartadas', async () => {
-  for (const t of ['Legendas pela comunidade Amara.org', 'Obrigado por assistir.', 'Obrigado.', '...']) assert.equal(groq.cleanTranscript(t), '', t);
+  for (const t of ['Araguaína, Tocantins, Bíblia, Groq.', 'Legendas pela comunidade Amara.org', 'Obrigado por assistir.', 'Obrigado.', '...']) assert.equal(groq.cleanTranscript(t), '', t);
   assert.equal(groq.cleanTranscript('Obrigado pela ajuda, Jarvis'), 'Obrigado pela ajuda, Jarvis');
   handler = async () => json({ text: 'Legendas pela comunidade Amara.org' });
   assert.equal((await (await post()).json()).text, '');

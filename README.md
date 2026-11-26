@@ -129,8 +129,7 @@ o reconhecimento do Google por 1 minuto. O áudio passa pelos servidores do Groq
 
 ### Começa dormindo · bom dia · clima
 Ao abrir, o JARVIS **começa dormindo** (tela escura, mantida ligada para ouvir). Acorda com **duas palmas**
-(principal) ou dizendo **“Jarvis”**: a tela acende, ele dá um **bom dia criativo** (frase da IA online quando
-responde em até 2,5 s; senão frases próprias que não se repetem) com o **clima real** de agora e já fica ouvindo.
+(principal) ou dizendo **“Jarvis”**: a tela acende, ele diz só **“Bom dia, <nome>! O que vai ser hoje?”** e já fica ouvindo (clima e outros assuntos só quando você perguntar).
 Desligue em Configurações → INTERFACE → “Começar dormindo”.
 Clima: **Open-Meteo** (gratuito, sem chave), cidade padrão **Araguaína-TO** (`JARVIS_WEATHER_CITY/LAT/LON`).
 Pergunte “como está o dia hoje?”, “vai chover?”, “previsão para amanhã”, “previsão da semana”. Sem dados, ele
