@@ -85,6 +85,26 @@ export const CAPABILITIES = 'Posso abrir a Bíblia de onde você parou, trazer n
 export const NO_AI_HINT = 'Para conversar livremente sobre qualquer assunto, de graça e sem internet, instale uma IA local como o Ollama (veja "IA local gratuita" no README).';
 
 /**
+ * Respostas sociais INSTANTÂNEAS (cumprimento, agradecimento, "tudo bem?"), usadas
+ * mesmo com IA ligada: não faz sentido esperar a IA do celular para um "boa noite".
+ * Só reconhece a frase curta e inteira; "boa noite, me explica X" segue para a IA.
+ */
+export function socialReply(text, { nome } = {}) {
+  const t = normalize(text).replace(/^(ei |ok )?jarvis[,\s]*/, '').replace(/[,\s]*jarvis$/, '').replace(/[.!?]+$/, '').trim();
+  const r = (txt, intent) => ({ text: txt, intent, module: 'CÉREBRO', mode: 'CONVERSA' });
+  const who = nome ? `, ${nome}` : '';
+  if (/^(oi|ola|e ai|eai|bom dia|boa tarde|boa noite|fala|salve|opa|hey|oi tudo bem|ola tudo bem)$/.test(t)) {
+    const h = formatTimeSpoken().h;
+    const g = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+    return r(`${g}${who}! Em que posso ajudar?`, 'conversation.greeting');
+  }
+  if (/^(tudo bem|tudo bom|como (voce )?(esta|vai)|tudo certo|beleza|suave|de boa)( (com voce|e voce|contigo))?$/.test(t)) return r('Tudo em ordem por aqui, sistemas funcionando. E com você, como estão as coisas?', 'conversation.smalltalk');
+  if (/^(muito )?(obrigad[oa]|valeu|vlw|agradeco|brigad[oa])( (jarvis|mesmo|demais))?$/.test(t)) return r('Por nada. Estou por aqui.', 'conversation.thanks');
+  if (/^(tchau|ate mais|ate logo|falou|boa noite e ate amanha)$/.test(t)) return r(`Até mais${who}. Quando precisar, é só chamar.`, 'conversation.bye');
+  return null;
+}
+
+/**
  * Resposta local. Sempre devolve algo honesto.
  * @returns {{ text:string, intent:string, module:string, mode?:string, speech?:string }}
  */

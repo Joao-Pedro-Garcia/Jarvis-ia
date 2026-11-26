@@ -11,7 +11,7 @@ import { ENGINE_DISCLAIMER } from '../modules/engine/engine.js';
 import { detectTone, detectDomain, emergencyText } from './tone.js';
 import { getPersonality, systemPrompt } from './personality.js';
 import * as llm from './llm.js';
-import { localReply, getMode, clearMode } from './local-mind.js';
+import { localReply, getMode, clearMode, socialReply } from './local-mind.js';
 import * as tasks from '../modules/tasks/tasks.js';
 import { normalizeInput, resolveIntent, dispatch, handlePending, moduleResult, speechFrom, speechLimit, getRecentCommands } from './orchestrator.js';
 
@@ -55,6 +55,11 @@ async function converse(text, ctx, tone) {
   const domain = detectDomain(text);
   const base = { module: domain === 'motor' ? 'MOTOR' : domain === 'engenharia' ? 'ENGENHARIA' : 'CÉREBRO', tone: tone.mode };
   const emergency = tone.mode === 'urgente' ? emergencyText(text) : '';
+  // Cumprimentos e agradecimentos: resposta instantânea, sem acionar a IA.
+  if (!emergency && tone.mode !== 'desabafo') {
+    const quick = socialReply(text, { nome: getPersonality().nome_usuario });
+    if (quick) return moduleResult({ ...base, ...quick, message: quick.text, source: 'local (resposta instantânea)' });
+  }
   await llm.refresh().catch(() => {});
   if (!llm.available()) return localAnswer(text, ctx, tone, base, emergency);
   const p = getPersonality();

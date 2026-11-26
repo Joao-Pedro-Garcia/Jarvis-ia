@@ -64,3 +64,23 @@ test('IA local (Ollama): instruções curtas, histórico curto, resposta limitad
   assert.ok(body.messages.length <= 6, `${body.messages.length} mensagens enviadas`);
   assert.equal(body.messages.at(-1).content, 'me conte uma curiosidade');
 });
+
+test('cumprimentos e agradecimentos respondem na hora, sem chamar a IA (mesmo com IA ligada)', async () => {
+  let chats = 0;
+  mock = mockFetch([
+    ['127.0.0.1:11434/api/tags', () => jsonResponse({ models: [{ name: 'qwen2.5:0.5b' }] })],
+    ['127.0.0.1:11434/api/generate', () => jsonResponse({ done: true })],
+    ['127.0.0.1:11434/api/chat', () => { chats++; return jsonResponse({ message: { content: 'Resposta da IA.' } }); }],
+  ]);
+  await llm.refresh({ force: true });
+  for (const q of ['boa noite', 'Jarvis, boa noite!', 'oi', 'obrigado', 'valeu jarvis', 'tudo bem?', 'tchau']) {
+    const t0 = Date.now();
+    const r = await processInput(q, { sessionId: 'speed-social' });
+    assert.ok(Date.now() - t0 < 200, `${q}: ${Date.now() - t0} ms`);
+    assert.ok(/conversation\.(greeting|thanks|smalltalk|bye)/.test(r.intent), `${q} → ${r.intent}`);
+  }
+  assert.equal(chats, 0, 'a IA não deveria ser chamada para cumprimentos');
+  const r = await processInput('boa noite, me explica como funciona um motor a combustão', { sessionId: 'speed-social' });
+  assert.equal(chats, 1, 'pergunta de verdade vai para a IA');
+  assert.equal(r.text, 'Resposta da IA.');
+});
