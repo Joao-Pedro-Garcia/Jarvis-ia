@@ -78,18 +78,25 @@ bus.on('voice:fallback', ({ reason } = {}) => {
   addMsg('system', `⚠️ A voz escolhida não respondeu (${reason}). Falando com a voz do celular. Para voz masculina: Configurações → VOZ → “Como deixar a voz MASCULINA”.`);
 });
 /** Fala, com possibilidade de interrupção por "pare" (voz) ou duas palmas. */
+let speechClapHold = 0;
 async function say(text) {
   const s = getSettings();
   if (!text || !s?.voice?.enabled || s.voice.silent) return;
   setState('speaking');
   holdWake(true); // a escuta do "Jarvis" cortaria a fala no Android
+  // O detector de palmas ouviria a PRÓPRIA voz do JARVIS no alto-falante ("p", "t" parecem
+  // palmas) e cortaria a fala no meio: fica pausado enquanto ele fala.
+  speechClapHold++;
+  await wake?.pause();
   const speaking = speak(text);
   // Interrupção por voz (só depois que a fala começou). No Android, só se as
   // palmas estiverem desligadas — o microfone é um só.
   const barge = s.voice.bargeIn && hearingSupported && !(isAndroid && s.clap.enabled)
-    ? startBargeIn({ lang: s.hearing.lang, onStop: () => { stopSpeaking(); setState('standby'); }, onPause: () => togglePause() }) : null;
+    ? startBargeIn({ lang: s.hearing.lang, onStop: () => { clientLog('voz', 'Fala interrompida: "pare" ouvido', 'warn'); stopSpeaking(); setState('standby'); }, onPause: () => togglePause() }) : null;
   await speaking.finally(() => holdWake(false));
   barge?.(); stopBargeIn();
+  // Volta a ouvir palmas um instante depois (o fim do som não pode virar "palma").
+  setTimeout(() => { if (--speechClapHold === 0 && !isListening() && !listenStarting) wake?.resume(getSettings()); }, 350);
   if (getState() === 'speaking') setState('standby');
 }
 
@@ -97,7 +104,9 @@ function togglePause() {
   if (isPaused()) { resumeSpeaking(); document.body.classList.remove('speech-paused'); setState('speaking'); }
   else if (pauseSpeaking()) { document.body.classList.add('speech-paused'); setState('standby', 'FALA PAUSADA'); }
 }
-function stopAll() { stopSpeaking(); stopBargeIn(); document.body.classList.remove('speech-paused'); setState('standby'); }
+function stopAll(why = '') {
+  if (why && isSpeaking()) clientLog('voz', `Fala interrompida: ${why}`, 'warn'); // registro para achar cortes inesperados
+  stopSpeaking(); stopBargeIn(); document.body.classList.remove('speech-paused'); setState('standby'); }
 
 // ============================================================ cérebro
 function clientInfo() {
@@ -173,7 +182,7 @@ async function handleInput(text, source = 'text') {
   if (SLEEP_RE.test(low)) { if (!asleep) sleepNow(); else addMsg('system', 'Já estou dormindo. Bata duas palmas ou diga “Jarvis”.', 'SISTEMA'); return; }
   if (asleep) { wakeUp('comando de voz'); }
   busy = true;
-  stopAll();
+  stopAll('nova pergunta');
   addMsg('user', text);
   setState('thinking');
   const t0 = performance.now();
@@ -224,7 +233,7 @@ async function handleInput(text, source = 'text') {
   if (res.intent?.startsWith('system.silent')) { await refreshSettings(); }
   applyUi(res);
   const actions = res.clientActions || [];
-  if (actions.includes('stopSpeech')) { stopAll(); return; }
+  if (actions.includes('stopSpeech')) { stopAll('comando parar'); return; }
   if (actions.includes('pauseSpeech')) { togglePause(); return; }
   if (actions.includes('resumeSpeech')) { if (isPaused()) togglePause(); return; }
   if (res.error) setState('error');
@@ -285,7 +294,7 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
   if (listenStarting) return;
   listenStarting = true;
   try {
-    stopAll();
+    stopAll('microfone aberto');
     const clapWasOn = !!wake?.status()?.clap?.running;
     await wake?.pause();
     // Espera o detector de palmas soltar o microfone antes de o Google começar a ouvir.
@@ -348,7 +357,7 @@ bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 bus.on(EVENTS.PALMS_DETECTED, (evt) => {
   if (evt?.test) return; // teste do diagnóstico: não inicia conversa
   if (asleep) { wakeUp('duas palmas'); greetOnWake(); return; }
-  if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
+  if (isSpeaking() || isPaused()) { stopAll('duas palmas'); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
   startListening({ chime: false, greet: 'Sim?', quiet: 'silence' });
@@ -486,10 +495,10 @@ $('#command-form').addEventListener('submit', (e) => {
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
 $('#core-button').addEventListener('click', () => {
   if (asleep) { wakeUp('toque'); greetOnWake(); return; }
-  return isSpeaking() || isPaused() ? stopAll() : startListening();
+  return isSpeaking() || isPaused() ? stopAll('toque no núcleo') : startListening();
 });
 $('#stop-btn').addEventListener('click', stopAll);
-$('#stop-speech').addEventListener('click', () => { stopAll(); updateTopStatus(); });
+$('#stop-speech').addEventListener('click', () => { stopAll('botão parar'); updateTopStatus(); });
 $('#pause-btn').addEventListener('click', togglePause);
 // ============================================================ conversas (estilo ChatGPT)
 // Cada conversa tem título e fica salva no servidor (data/chats.json).
