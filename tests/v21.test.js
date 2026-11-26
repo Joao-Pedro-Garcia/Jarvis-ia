@@ -147,7 +147,8 @@ test('IA local: detecta Ollama, escolhe modelo de conversa e responde sem chave'
   let sent;
   mock = mockFetch([
     ['127.0.0.1:11434/api/tags', () => jsonResponse(TAGS)],
-    ['127.0.0.1:11434/v1/chat/completions', (u, o) => { sent = o; return jsonResponse({ choices: [{ message: { content: 'Olá, sou o JARVIS local.' } }] }); }],
+    ['127.0.0.1:11434/api/generate', () => jsonResponse({ done: true })],
+    ['127.0.0.1:11434/api/chat', (u, o) => { sent = o; return jsonResponse({ message: { role: 'assistant', content: 'Olá, sou o JARVIS local.' }, done: true }); }],
   ]);
   const st = await llm.refresh({ force: true });
   assert.equal(st.configured, true); assert.equal(st.kind, 'local'); assert.equal(st.state, 'IA LOCAL'); assert.equal(st.free, true);

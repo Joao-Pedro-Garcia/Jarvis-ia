@@ -293,6 +293,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'ser
     const ai = await llm.refresh({ force: true }).catch(() => llm.status());
     const aiText = ai.configured ? `${ai.state} — ${ai.providerName} · ${ai.model}` : 'IA INDISPONÍVEL — modo local inteligente (para IA gratuita, instale o Ollama: veja o README)';
     log.info('sistema', `JARVIS online (v${VERSION}) em ${protocol}://${HOST}:${PORT} · ${aiText}`);
+    // Busca notícias, câmbio e combustíveis em segundo plano: a primeira pergunta já sai rápida.
+    news.prefetch().then(() => log.info('noticias', 'Notícias, câmbio e combustíveis pré-carregados')).catch(() => {});
     console.log(`\n  JARVIS online (v${VERSION}) → ${protocol}://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}\n  ${aiText}\n`);
   });
   const stop = () => { bus.emitEvent(EVENTS.ASSISTANT_STOPPED, {}); log.info('sistema', 'Encerrando JARVIS'); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 1500).unref(); };

@@ -14,6 +14,28 @@ import { fetchAll, lastSaved } from './feeds.js';
 export const NEWS_UNAVAILABLE = 'NÃO CONSEGUI CONFIRMAR AS NOTÍCIAS AGORA. Não consegui acessar as fontes de notícias neste momento.';
 const CACHE_MAX_H = 48;
 
+// PRAZO DE RESPOSTA: o JARVIS responde em ~3 s com o que já chegou. O que ainda
+// estiver carregando continua em segundo plano (e fica no cache para a próxima vez).
+const BUDGET_MS = () => Number(process.env.JARVIS_NEWS_BUDGET_MS) || 3000;
+export const PENDING = {
+  exchange: 'A cotação ainda está carregando. Peça “dólar” de novo em alguns segundos.',
+  fuel: 'Os preços dos combustíveis ainda estão carregando (a pesquisa da ANP é um arquivo grande). Peça “gasolina” de novo em alguns segundos.',
+  news: 'As notícias ainda estão carregando. Peça “notícias” de novo em alguns segundos.',
+};
+/** Espera `promise` até o prazo; se passar, devolve `pending` (a busca continua sozinha). */
+export function withBudget(promise, pending, ms = BUDGET_MS()) {
+  let timer;
+  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(pending), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+export const exchangeFast = () => withBudget(getExchange().catch((e) => ({ ok: false, error: e.message })), { ok: false, pending: true, rates: [], error: PENDING.exchange });
+export const fuelFast = (uf = 'TO') => withBudget(getFuel(uf).catch((e) => ({ ok: false, error: e.message })), { ok: false, pending: true, error: PENDING.fuel });
+
+/** Busca tudo em segundo plano (ao iniciar o servidor) para a primeira pergunta ser instantânea. */
+export function prefetch() {
+  return Promise.allSettled([getExchange(), getFuel('TO'), fetchAll()]);
+}
+
 const HISTORY = 'news-history';
 const HISTORY_DAYS = 4;
 
@@ -132,15 +154,15 @@ export const getLastSummary = () => lastSummary;
 export async function getSummary({ parts = ['exchange', 'fuel', 'brazil', 'world', 'curiosity'] } = {}) {
   const wantStories = parts.some((p) => ['brazil', 'world', 'curiosity'].includes(p));
   const [exchange, fuel, feeds] = await Promise.all([
-    parts.includes('exchange') ? getExchange().catch((e) => ({ ok: false, error: e.message })) : null,
-    parts.includes('fuel') ? getFuel('TO').catch((e) => ({ ok: false, error: e.message })) : null,
-    wantStories ? fetchAll().catch((e) => ({ items: [], failed: ['todas'], error: e.message })) : null,
+    parts.includes('exchange') ? exchangeFast() : null,
+    parts.includes('fuel') ? fuelFast('TO') : null,
+    wantStories ? withBudget(fetchAll().catch((e) => ({ items: [], failed: ['todas'], error: e.message })), { items: [], failed: [], pending: true }) : null,
   ]);
   let stories = null;
   if (wantStories) {
     const h = history();
     if (!feeds.items.length) {
-      stories = { brazil: [], world: [], curiosity: null, error: NEWS_UNAVAILABLE };
+      stories = { brazil: [], world: [], curiosity: null, error: feeds.pending ? PENDING.news : NEWS_UNAVAILABLE, pending: !!feeds.pending };
       // Cache identificado: as últimas matérias que obtive, com data — nunca como atuais.
       const saved = lastSaved();
       if (saved.items.length && saved.fetchedAt && Date.now() - Date.parse(saved.fetchedAt) < CACHE_MAX_H * 3600e3) {
@@ -177,6 +199,7 @@ export function spokenMoney(v) {
 }
 
 export function exchangeText(ex, only) {
+  if (ex?.pending) return { text: ex.error, speech: ex.error };
   if (!ex?.ok) {
     const lk = ex?.lastKnown;
     const rates = lk ? (only ? lk.rates.filter((r) => r.code === only) : lk.rates) : [];
@@ -193,6 +216,7 @@ export function exchangeText(ex, only) {
 }
 
 export function fuelText(f, which) {
+  if (f?.pending) return { text: f.error, speech: f.error };
   if (!f?.ok) {
     const lk = f?.lastKnown;
     const last = lk ? ` A última pesquisa que obtive é de ${lk.period.from.split('-').reverse().join('/')} a ${lk.period.to.split('-').reverse().join('/')} (consultada em ${formatDateTime(new Date(lk.savedAt))}) — pode não refletir os preços atuais.` : '';
@@ -209,7 +233,7 @@ export function fuelText(f, which) {
 
 export function storiesSpeech(st) {
   if (!st) return '';
-  if (st.error) return `${st.error}${st.cached ? ' Mostrei na tela as últimas notícias que obtive, com a data e a hora — elas não foram confirmadas agora.' : ''}`;
+  if (st.error) return `${st.error}${st.cached && !st.pending ? ' Mostrei na tela as últimas notícias que obtive, com a data e a hora — elas não foram confirmadas agora.' : ''}`;
   const say = (arr) => arr.slice(0, 3).map((s) => (s.repeated && s.update ? `Continua em destaque: ${s.title}. ${s.update}` : `${s.title}.`)).join(' ');
   let out = '';
   if (st.brazil.length) out += ` No Brasil: ${say(st.brazil)}`;

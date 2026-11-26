@@ -10,7 +10,7 @@ import { log } from '../core/logger.js';
 import { bus, EVENTS } from '../core/events.js';
 import { anthropicProvider } from './ai/anthropic.js';
 import { openAICompatibleProvider } from './ai/openai-compatible.js';
-import { localProvider, detectLocal, localInfo } from './ai/local.js';
+import { localProvider, detectLocal, localInfo, warmUp } from './ai/local.js';
 
 const CLOUD = { anthropic: anthropicProvider, openai: openAICompatibleProvider, 'openai-compatible': openAICompatibleProvider };
 let lastError = null;
@@ -72,7 +72,11 @@ export async function refresh({ force = false } = {}) {
   const last = localInfo().lastProbe?.at;
   if (force || !last || Date.now() - Date.parse(last) > 30000) {
     probing ??= detectLocal().then((d) => {
-      if (d) log.info('cerebro', `IA local detectada: ${d.name} · modelo ${d.model}`);
+      if (d) {
+        log.info('cerebro', `IA local detectada: ${d.name} · modelo ${d.model}`);
+        // Pré-carrega o modelo em segundo plano (a primeira pergunta não espera o carregamento).
+        warmUp().then((ok) => ok && log.info('cerebro', `Modelo ${d.model} carregado na memória`)).catch((e) => log.warn('cerebro', `Pré-carregamento do modelo falhou: ${e.message}`));
+      }
       return d;
     }).finally(() => { probing = null; });
     await probing;

@@ -37,6 +37,19 @@ function history(sess) {
   return msgs;
 }
 
+/** Instruções curtas para IA local (celular/PC comum): menos texto para ler = resposta rápida. */
+function compactPrompt(p, tone, domain) {
+  const mem = memory.contextSnippet();
+  return [
+    `Você é ${p.nome}, assistente pessoal${p.nome_usuario ? ` de ${p.nome_usuario}` : ''}. Responda sempre em português do Brasil, em no máximo 3 frases curtas e naturais (a resposta é falada em voz alta).`,
+    `Tom agora: ${tone.mode}. Assunto sério: seja sério e objetivo. Desabafo: acolha com carinho e faça uma pergunta. Brincadeira: seja leve.`,
+    domain ? `Assunto técnico (${domain}): seja preciso e use unidades.` : '',
+    'Nunca invente notícias, preços, cotações ou fatos. Se não souber, diga que não sabe.',
+    `Agora: ${formatDateLong()}, ${formatTimeSpoken().text}.`,
+    mem ? `O que você sabe do usuário: ${mem.slice(0, 300)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 async function converse(text, ctx, tone) {
   const { sess } = ctx;
   const domain = detectDomain(text);
@@ -45,8 +58,9 @@ async function converse(text, ctx, tone) {
   await llm.refresh().catch(() => {});
   if (!llm.available()) return localAnswer(text, ctx, tone, base, emergency);
   const p = getPersonality();
+  const isLocal = llm.kind() === 'local';
   const bibleCtx = sess.context.activeModule === 'bible' ? `O leitor da Bíblia está aberto. ${reading.whereAmI(ctx.pageSize)}` : '';
-  const system = systemPrompt(p, {
+  const system = isLocal ? compactPrompt(p, tone, domain) : systemPrompt(p, {
     tone, domain,
     memory: memory.contextSnippet(),
     context: [bibleCtx, sess.context.activeModule === 'news' ? 'O painel de notícias está aberto.' : ''].filter(Boolean).join(' '),
@@ -55,8 +69,10 @@ async function converse(text, ctx, tone) {
   const needsWeb = /\b(hoje|agora|atual\w*|ultim\w+|recente\w*|ontem|esta semana|resultado do jogo|placar|previsao do tempo|clima em|tempo em|preco d[eoa]|lancamento|quem ganhou)\b/.test(normalize(text));
   try {
     const { text: answer } = await llm.complete({
-      system, messages: [...history(sess), { role: 'user', content: text }],
-      maxTokens: tone.mode === 'estudo' || domain ? 2500 : 1200,
+      system,
+      // IA local: só as últimas mensagens (curtas) e resposta limitada → 2 a 3 segundos em vez de 10+.
+      messages: isLocal ? [...history(sess).slice(-4).map((m) => ({ ...m, content: m.content.slice(0, 400) })), { role: 'user', content: text }] : [...history(sess), { role: 'user', content: text }],
+      maxTokens: isLocal ? (tone.mode === 'estudo' || domain ? 220 : 140) : tone.mode === 'estudo' || domain ? 2500 : 1200,
       effort: domain || tone.mode === 'estudo' ? 'medium' : undefined,
       webSearch: needsWeb && getSettings().privacy.allowWebSearch,
     });

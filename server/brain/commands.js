@@ -6,8 +6,6 @@
 import * as reading from '../modules/bible/reading.js';
 import { findReference, refLabel } from '../modules/bible/books.js';
 import * as news from '../modules/news/news.js';
-import { getExchange } from '../modules/news/exchange.js';
-import { getFuel } from '../modules/news/fuel.js';
 import * as memory from '../modules/memory/memory.js';
 import * as house from '../modules/house/house.js';
 import { tryMath, formatNumber } from '../modules/engineering/math.js';
@@ -181,7 +179,7 @@ registerCommand({
     const t = tasks.today();
     const bible = await reading.current(ctx.pageSize).catch(() => null);
     const online = await isOnline();
-    const ex = online ? await getExchange().catch(() => null) : null;
+    const ex = online ? await news.exchangeFast() : null;
     const lines = ['Seu dia, por prioridade:'];
     const speech = [];
     if (t.overdue.length) { lines.push(`⚠ Atrasadas: ${t.overdue.map((x) => tasks.describe(x)).join('; ')}`); speech.push(`Você tem ${t.overdue.length} tarefa${t.overdue.length > 1 ? 's' : ''} atrasada${t.overdue.length > 1 ? 's' : ''}.`); }
@@ -384,7 +382,7 @@ registerCommand({
   ],
   params: (t) => ({ currency: currencyOf(t) }),
   action: async ({ currency }, ctx) => {
-    const ex = await getExchange().catch(() => ({ ok: false }));
+    const ex = await news.exchangeFast();
     const out = news.exchangeText(ex, currency);
     ctx.sess.context.activeModule = 'news';
     return say(out.text, { speech: out.speech, ui: { panel: 'news', news: { exchange: ex, parts: ['exchange'] } } });
@@ -397,7 +395,7 @@ registerCommand({
   patterns: [(t) => (/\b(gasolina|diesel|combustive(l|is))\b/.test(t) && /\b(quanto|preco|precos|valor|como|esta|ta|custa|media|litro|tocantins|brasil)\b|^(gasolina|diesel|combustive(l|is))$/.test(t) && !/\bmotor (a|de) diesel\b/.test(t) ? [t] : null)],
   params: (t) => ({ which: /gasolina/.test(t) && !/diesel/.test(t) ? 'gasolina' : /diesel/.test(t) && !/gasolina/.test(t) ? 'diesel' : null }),
   action: async ({ which }, ctx) => {
-    const f = await getFuel('TO').catch(() => ({ ok: false }));
+    const f = await news.fuelFast('TO');
     const out = news.fuelText(f, which);
     ctx.sess.context.activeModule = 'news';
     return say(out.text, { speech: out.speech, ui: { panel: 'news', news: { fuel: f, parts: ['fuel'] } } });
@@ -441,9 +439,9 @@ registerCommand({
     ctx.sess.context.activeModule = 'news';
     const parts = ['Claro. Aqui está seu resumo.'];
     const ex = news.exchangeText(summary.exchange);
-    parts.push(summary.exchange?.ok ? `${ex.speech}` : 'Não consegui confirmar a cotação atual neste momento.');
+    parts.push(summary.exchange?.ok || summary.exchange?.pending ? `${ex.speech}` : 'Não consegui confirmar a cotação atual neste momento.');
     const fu = news.fuelText(summary.fuel);
-    parts.push(summary.fuel?.ok ? fu.speech : 'Os preços de combustíveis da ANP não estão acessíveis agora.');
+    parts.push(summary.fuel?.ok || summary.fuel?.pending ? fu.speech : 'Os preços de combustíveis da ANP não estão acessíveis agora.');
     parts.push(news.storiesSpeech(summary.stories));
     parts.push('Quer que eu aprofunde alguma delas?');
     return say(parts.join(' '), { ui: { panel: 'news', news: summary } });
