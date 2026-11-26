@@ -4,6 +4,7 @@ import { bus, EVENTS } from '../core/bus.js';
 import { clientLog } from '../core/logger.js';
 
 const synth = window.speechSynthesis;
+const ANDROID = /Android/i.test(navigator.userAgent);
 export const voiceSupported = !!synth || typeof Audio !== 'undefined';
 let voices = [];
 let speakingToken = 0;
@@ -135,12 +136,13 @@ export async function speak(text) {
 
 function speakBrowser(text, token, emit = true) {
   if (!synth) return Promise.resolve(false);
-  const list = chunks(text);
+  const list = chunks(text, 220).flatMap((c) => (c.length > 260 ? c.match(/[^,;]+[,;]?\s*/g).reduce((a, p) => { if (a.length && (a[a.length - 1] + p).length <= 220) a[a.length - 1] += p; else a.push(p); return a; }, []).map((x) => x.trim()) : [c]));
   const voice = pickVoice();
   return new Promise((resolve) => {
     let i = 0;
-    // Chrome às vezes pausa sozinho em falas longas: "keepalive".
-    const keep = setInterval(() => { if (synth.speaking && !synth.paused && !paused) { synth.pause(); synth.resume(); } }, 10000);
+    // Chrome do computador às vezes pausa sozinho em falas longas: "keepalive".
+    // NUNCA no Android: lá pause() CANCELA a fala (ela parava no começo).
+    const keep = ANDROID ? null : setInterval(() => { if (synth.speaking && !synth.paused && !paused) { synth.pause(); synth.resume(); } }, 10000);
     const done = (completed) => { clearInterval(keep); if (emit && token === speakingToken) bus.emit(EVENTS.SPEECH_FINISHED, { completed }); resolve(completed); };
     const next = () => {
       if (token !== speakingToken) return done(false);

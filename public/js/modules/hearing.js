@@ -221,8 +221,19 @@ export function setWakeWord(enabled, { lang = 'pt-BR', name = 'jarvis' } = {}) {
   if (wakeEnabled) startWake(lang); else stopWake();
 }
 
-function startWake(lang = 'pt-BR') {
-  if (!wakeEnabled || active || wakeRec) return;
+// Enquanto o JARVIS fala, a escuta do "Jarvis" fica parada: no Android cada reinício do
+// reconhecimento toma o áudio e CORTA a fala no meio.
+let holds = 0; // várias falas seguidas: só solta quando a última terminar
+let speechHold = false;
+let wakeLang = 'pt-BR';
+export function holdWake(on) {
+  holds = Math.max(0, holds + (on ? 1 : -1));
+  speechHold = holds > 0;
+  if (speechHold) stopWake(); else resumeWake();
+}
+function startWake(lang = wakeLang) {
+  wakeLang = lang;
+  if (!wakeEnabled || active || wakeRec || speechHold) return;
   wakeRec = new SR();
   wakeRec.lang = lang; wakeRec.continuous = true; wakeRec.interimResults = false;
   wakeRec.onresult = (e) => {

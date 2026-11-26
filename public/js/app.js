@@ -7,7 +7,7 @@ import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
-import { configureStt, listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
+import { holdWake, configureStt, listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
 import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
@@ -82,12 +82,13 @@ async function say(text) {
   const s = getSettings();
   if (!text || !s?.voice?.enabled || s.voice.silent) return;
   setState('speaking');
+  holdWake(true); // a escuta do "Jarvis" cortaria a fala no Android
   const speaking = speak(text);
   // Interrupção por voz (só depois que a fala começou). No Android, só se as
   // palmas estiverem desligadas — o microfone é um só.
   const barge = s.voice.bargeIn && hearingSupported && !(isAndroid && s.clap.enabled)
     ? startBargeIn({ lang: s.hearing.lang, onStop: () => { stopSpeaking(); setState('standby'); }, onPause: () => togglePause() }) : null;
-  await speaking;
+  await speaking.finally(() => holdWake(false));
   barge?.(); stopBargeIn();
   if (getState() === 'speaking') setState('standby');
 }
