@@ -418,3 +418,9 @@ body:not(.asleep) .layout, body:not(.asleep) .dock { transition: opacity .8s eas
 .groq-steps { margin: 6px 0 10px; padding-left: 20px; display: grid; gap: 4px; }
 .groq-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .groq-row .inline-input { flex: 1; min-width: 0; min-height: 40px; }
+
+/* Agenda: dias da semana */
+.ag-days { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.ag-day { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line, #1f4b5a); background: transparent; color: var(--muted, #7fa9b8); font: inherit; font-weight: 700; cursor: pointer; }
+.ag-day.on { background: var(--accent, #2ee6ff); color: #001018; border-color: transparent; }
+.ag-quick { display: flex; gap: 6px; flex-wrap: wrap; }

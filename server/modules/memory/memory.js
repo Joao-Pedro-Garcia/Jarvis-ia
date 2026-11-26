@@ -63,9 +63,9 @@ export function add(kind, text, extra = {}) {
   const clean = String(text || '').trim();
   if (!clean) throw new Error('Memória vazia');
   const d = db();
-  const dup = !extra.sensitive && d[kind].find((m) => !m.secret && m.status !== 'cancelled' && normalize(m.text) === normalize(clean));
+  const dup = !extra.sensitive && !extra.allowDup && d[kind].find((m) => !m.secret && m.status !== 'cancelled' && normalize(m.text) === normalize(clean));
   if (dup) return mask(dup);
-  const { sensitive, ...rest } = extra;
+  const { sensitive, allowDup, ...rest } = extra;
   const item = { id: crypto.randomUUID(), kind, text: clean.slice(0, 1000), createdAt: new Date().toISOString(), ...rest };
   if (sensitive) { item.secret = encrypt(item.text); item.text = ''; item.sensitiveLabel = sensitive; }
   if (kind === 'tasks') item.done = false;

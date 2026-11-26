@@ -17,7 +17,7 @@ import { $, $$, esc, toast, relTime } from './ui/dom.js';
 import { closeSheet, currentSheet } from './ui/sheet.js';
 import { showBible, renderBibleMini, bibleActions, pageSize } from './ui/bible-reader.js';
 import { showNews, showStory } from './ui/news-panel.js';
-import { showMemory, showSettings, showModules, showHouse, showMenu } from './ui/panels.js';
+import { showMemory, showSettings, showModules, showHouse, showMenu, showAgenda } from './ui/panels.js';
 import { showDiagnostics, runSelfTest } from './ui/diagnostics.js';
 import { checkBrowserAI, browserAIState, askBrowserAI } from './modules/browser-ai.js';
 
@@ -281,6 +281,7 @@ function applyUi(res) {
     case 'selftest': runSelfTest({ speakResult: (t) => { addMsg('jarvis', t, { tag: 'SISTEMA' }); return say(t); } }); break;
     case 'modules': showModules(); break;
     case 'house': showHouse(); break;
+    case 'agenda': showAgenda(); break;
     default: break;
   }
 }
@@ -609,6 +610,7 @@ const PANELS = {
   menu: () => showMenu({
     bible: () => handleInput('Bíblia'), news: () => handleInput('Notícias'), memory: () => showMemory(history), modules: showModules, house: showHouse, settings: openSettings, diagnostics: showDiagnostics,
     conversas: () => { closeSheet(); openDrawer(); },
+    agenda: () => showAgenda(),
     clap: () => { const s = getSettings(); saveSettings({ clap: { enabled: !s.clap.enabled } }).then((n) => applySettings(n, 'clap.enabled')); closeSheet(); },
     stop: () => { stopAll(); closeSheet(); },
   }),
@@ -646,6 +648,14 @@ document.addEventListener('visibilitychange', () => {
 
 // ============================================================ lembretes (servidor → navegador)
 async function onReminder(evt) {
+  // Rotina com ação (notícias, clima, meu dia…): executa o comando como se você tivesse pedido.
+  if (evt.payload.command) {
+    addMsg('system', `⏰ Rotina: ${evt.payload.text}`);
+    notify('JARVIS — Rotina', evt.payload.text).catch(() => {});
+    for (let i = 0; i < 60 && (busy || isListening()); i++) await new Promise((r) => setTimeout(r, 500)); // espera terminar o que estiver fazendo
+    handleInput(evt.payload.command, 'routine');
+    return;
+  }
   const text = `⏰ Lembrete: ${evt.payload.text}`;
   addMsg('jarvis', text, { tag: 'TAREFAS' });
   sounds.activate();

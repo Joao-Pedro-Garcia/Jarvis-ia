@@ -266,10 +266,62 @@ export async function showHouse() {
   });
 }
 
+// ---------------- AGENDA (rotinas com horário) ----------------
+const WD = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+const WD_FULL = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+export async function showAgenda() {
+  openSheet('agenda', 'AGENDA', async (body) => {
+    const reload = () => showAgenda();
+    const data = await api.get('/api/tasks').catch(() => ({ tasks: [], actions: {} }));
+    const actions = data.actions && Object.keys(data.actions).length ? data.actions : { lembrete: 'Lembrete' };
+    const routines = data.tasks.filter((t) => t.repeat);
+    const once = data.tasks.filter((t) => !t.repeat && t.dueAt);
+    const nextTxt = (t) => (t.dueAt ? new Date(t.dueAt).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+    const item = (t) => `<li data-id="${t.id}"><span class="t"><b>${esc(t.text)}</b>${t.action && t.action !== 'lembrete' ? ` <span class="badge">${esc(actions[t.action] || t.action)}</span>` : ''}<br><small class="muted">${t.repeat ? `${esc(t.repeatLabel || '')} · próxima: ${nextTxt(t)}` : nextTxt(t)}</small></span><button class="btn small" data-del>Apagar</button></li>`;
+    body.innerHTML = `
+      <fieldset class="fieldset"><legend>NOVA ROTINA</legend>
+        <div class="field"><label>O que fazer</label><select id="ag-action">${Object.entries(actions).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('')}</select></div>
+        <div class="field" id="ag-text-field"><label>Lembrete (o que eu devo te lembrar)</label><input id="ag-text" class="inline-input" maxlength="200" placeholder="Ex.: tomar o remédio"></div>
+        <div class="field"><label>Horário</label><input id="ag-time" type="time" value="07:00" class="inline-input"></div>
+        <div class="field"><label>Dias</label>
+          <div class="ag-days">${WD.map((d, i) => `<button type="button" class="ag-day on" data-day="${i}" aria-pressed="true" title="${WD_FULL[i]}">${d}</button>`).join('')}</div>
+          <div class="ag-quick"><button type="button" class="btn small" data-q="all">Todo dia</button><button type="button" class="btn small" data-q="week">Seg a sex</button><button type="button" class="btn small" data-q="weekend">Fim de semana</button></div>
+        </div>
+        <button class="btn" id="ag-save" type="button">Salvar rotina</button>
+        <p class="hint">Também por voz: “todo dia às 7h me lembre de tomar o remédio”, “de segunda a sexta às 6h30 me dê as notícias”. O JARVIS precisa estar aberto no horário para falar.</p>
+      </fieldset><br>
+      <fieldset class="fieldset"><legend>ROTINAS (${routines.length})</legend>
+        ${routines.length ? `<ul class="mem-list">${routines.map(item).join('')}</ul>` : '<p class="hint" style="margin:0">Nenhuma rotina ainda.</p>'}
+      </fieldset><br>
+      <fieldset class="fieldset"><legend>LEMBRETES COM DATA (${once.length})</legend>
+        ${once.length ? `<ul class="mem-list">${once.map(item).join('')}</ul>` : '<p class="hint" style="margin:0">Nenhum lembrete com data. Diga “me lembre amanhã às 9h de…”.</p>'}
+      </fieldset>`;
+    const act = $('#ag-action', body);
+    const syncText = () => { $('#ag-text-field', body).hidden = act.value !== 'lembrete'; };
+    act.addEventListener('change', syncText); syncText();
+    const dayBtns = () => [...body.querySelectorAll('.ag-day')];
+    const setDays = (list) => dayBtns().forEach((b) => { const on = list.includes(Number(b.dataset.day)); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    dayBtns().forEach((b) => b.addEventListener('click', () => { const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }));
+    body.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => setDays({ all: [0, 1, 2, 3, 4, 5, 6], week: [1, 2, 3, 4, 5], weekend: [0, 6] }[b.dataset.q])));
+    $('#ag-save', body).addEventListener('click', async () => {
+      const days = dayBtns().filter((b) => b.classList.contains('on')).map((b) => Number(b.dataset.day));
+      const text = $('#ag-text', body).value.trim();
+      if (!days.length) return toast('Escolha pelo menos um dia.');
+      if (act.value === 'lembrete' && !text) return toast('Escreva o que devo te lembrar.');
+      try {
+        const t = await api.post('/api/tasks', { text, action: act.value, repeat: { days, time: $('#ag-time', body).value } });
+        toast(`Rotina salva: ${t.text}.`);
+        reload();
+      } catch (err) { toast(err.message); }
+    });
+    body.querySelectorAll('li[data-id]').forEach((li) => confirmButton(li.querySelector('[data-del]'), async () => { await api.del(`/api/memory/${li.dataset.id}`); toast('Apagado.'); reload(); }, 'Apagar? Toque de novo'));
+  });
+}
+
 // ---------------- MENU (celular) ----------------
 export function showMenu(handlers) {
   openSheet('menu', 'MENU', (body) => {
-    const items = [['📖', 'Bíblia', 'bible'], ['📰', 'Notícias', 'news'], ['🧠', 'Memória', 'memory'], ['🧩', 'Módulos', 'modules'], ['🏠', 'Casa', 'house'], ['⚙️', 'Configurações', 'settings'], ['🩺', 'Diagnóstico', 'diagnostics'], ['💬', 'Conversas', 'conversas'], ['👏', 'Palmas on/off', 'clap'], ['🔇', 'Parar fala', 'stop']];
+    const items = [['📖', 'Bíblia', 'bible'], ['📰', 'Notícias', 'news'], ['🧠', 'Memória', 'memory'], ['🧩', 'Módulos', 'modules'], ['🏠', 'Casa', 'house'], ['⚙️', 'Configurações', 'settings'], ['🩺', 'Diagnóstico', 'diagnostics'], ['💬', 'Conversas', 'conversas'], ['⏰', 'Agenda', 'agenda'], ['👏', 'Palmas on/off', 'clap'], ['🔇', 'Parar fala', 'stop']];
     body.innerHTML = `<div class="menu-grid">${items.map(([i, l, k]) => `<button data-k="${k}"><span>${i}</span>${l}</button>`).join('')}</div>`;
     $$('[data-k]', body).forEach((b) => b.addEventListener('click', () => handlers[b.dataset.k]?.()));
   });

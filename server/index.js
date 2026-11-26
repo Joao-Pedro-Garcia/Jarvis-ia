@@ -237,11 +237,21 @@ async function api(req, res, url) {
     case 'PUT /api/personality': return send(res, 200, updatePersonality(await readBody(req)));
 
     // ---- Tarefas ----
-    case 'GET /api/tasks': return send(res, 200, { tasks: tasks.list({ includeDone: url.searchParams.get('all') === '1' }) });
+    case 'GET /api/tasks': return send(res, 200, { tasks: tasks.list({ includeDone: url.searchParams.get('all') === '1' }).map((t) => (t.repeat ? { ...t, repeatLabel: tasks.describeRepeat(t.repeat) } : t)), actions: Object.fromEntries(Object.entries(tasks.ACTIONS).map(([k, v]) => [k, v.label])) });
     case 'POST /api/tasks': {
       const body = await readBody(req);
-      if (!String(body.text || '').trim()) return send(res, 400, { error: 'Texto obrigatório' });
-      return send(res, 201, tasks.add(String(body.text).trim(), body.dueAt ? { dueAt: body.dueAt, hasTime: !!body.hasTime } : {}));
+      const action = tasks.ACTIONS[body.action] ? body.action : 'lembrete';
+      const text = String(body.text || '').trim() || (action !== 'lembrete' ? tasks.ACTIONS[action].label : '');
+      if (!text) return send(res, 400, { error: 'Texto obrigatório' });
+      if (memory.detectSensitive(text)) return send(res, 400, { error: 'Isso parece conter dados sensíveis. Por segurança, não vou salvar.' });
+      try {
+        // Agenda: { repeat: { days: [0..6], time: 'HH:MM' }, action } → rotina que se repete
+        if (body.repeat) {
+          if (!Array.isArray(body.repeat.days) || !body.repeat.days.length || !tasks.validTime(body.repeat.time)) return send(res, 400, { error: 'Escolha os dias e um horário válido' });
+          return send(res, 201, tasks.add(text, { repeat: body.repeat, action }));
+        }
+        return send(res, 201, tasks.add(text, body.dueAt ? { dueAt: body.dueAt, hasTime: !!body.hasTime, action } : { action }));
+      } catch (err) { return send(res, err.status || 400, { error: err.message }); }
     }
     case 'GET /api/internet': return send(res, 200, await internetStatus({ force: url.searchParams.get('force') === '1' }));
     case 'GET /api/ai': return send(res, 200, await llm.refresh({ force: url.searchParams.get('force') === '1' }));

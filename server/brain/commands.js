@@ -20,7 +20,7 @@ import { getSettings, updateSettings } from '../core/settings.js';
 import * as llm from './llm.js';
 import { isOnline } from '../core/http-client.js';
 import * as tasks from '../modules/tasks/tasks.js';
-import { parseWhen } from '../core/when.js';
+import { parseWhen, zonedParts } from '../core/when.js';
 import * as bibleProvider from '../modules/bible/provider.js';
 
 const registry = [];
@@ -516,7 +516,7 @@ const taskRefs = (sess) => sess.context.lastTaskId;
 const users = (sess) => sess.history.filter((h) => h.role === 'user');
 function resolveTask(t, sess) {
   const pend = tasks.list();
-  const n = (t.match(/\b(?:tarefa|lembrete|numero)\s+(\w+)/) || [])[1];
+  const n = (t.match(/\b(?:tarefa|lembrete|rotina|numero)\s+(\w+)/) || [])[1];
   if (n && parseOrdinal(n)) return pend[parseOrdinal(n) - 1] || null;
   const last = taskRefs(sess) && pend.find((x) => x.id === taskRefs(sess));
   if (last) return last;
@@ -560,6 +560,47 @@ registerCommand({
   },
 });
 
+// ---- AGENDA: rotinas com horário ("todo dia às 7h me lembre de…", "de segunda a sexta às 6h30 me dê as notícias") ----
+function parseRoutine(t, raw) {
+  const d = tasks.parseDays(t);
+  if (!d) return null;
+  const when = parseWhen(t.replace(d.phrase, ' '));
+  if (!when?.hasTime) return null;
+  const p = zonedParts(when.date);
+  const action = tasks.actionOf(when.rest);
+  let text = tasks.ACTIONS[action].label;
+  if (action === 'lembrete') {
+    const phrase = when.rest.replace(/^\s*(e |jarvis |,)*/, '').replace(/^(me |nos )?(lembr\w*|avis\w*|alert\w*|cham\w*)( me)?( (de|que|para|pra|sobre|da|do))?\s+/, '').replace(/^(lembrete|tarefa)( de| para| pra)?\s+/, '').trim();
+    text = phrase ? recoverOriginal(raw, phrase) : '';
+    if (text) text = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  return { days: d.days, time: `${p.h}:${String(p.mi).padStart(2, '0')}`, action, text };
+}
+registerCommand({
+  name: 'task.routine', module: 'TAREFAS', priority: 85, mutates: true, description: 'Agenda uma rotina com horário',
+  aliases: ['Todo dia às 7h me dê as notícias', 'De segunda a sexta às 6h30 me lembre de tomar o remédio'],
+  patterns: [(t) => (tasks.parseDays(t) && parseRoutine(t, t) ? [t] : null)],
+  params: (t, m, s) => ({ r: parseRoutine(t, s.lastRaw || t) }),
+  action: async ({ r }, ctx) => {
+    if (!r.text) return say('O que devo te lembrar nesse horário? Diga, por exemplo: "todo dia às 7h me lembre de tomar o remédio".');
+    if (memory.detectSensitive(r.text)) return say('Isso parece conter dados sensíveis. Por segurança, não vou salvar.');
+    const task = tasks.add(r.text, { repeat: { days: r.days, time: r.time }, action: r.action });
+    ctx.sess.context.lastTaskId = task.id;
+    const what = r.action === 'lembrete' ? `vou te lembrar: ${r.text}` : `${r.text.toLowerCase()}`;
+    return say(`Agendado: ${tasks.describeRepeat(task.repeat)}, ${what}.`, { data: { task }, ui: { panel: 'agenda' } });
+  },
+});
+registerCommand({
+  name: 'task.routines', module: 'TAREFAS', priority: 64, description: 'Mostra a agenda de rotinas',
+  aliases: ['Minhas rotinas', 'Abrir agenda'],
+  patterns: [/^(minhas |as |ver |mostr\w+ (as |minhas )?)?rotinas$/, /\b(abr\w+|mostr\w+|ver) (a )?agenda\b/, /^agenda$/, /\bquais (sao )?(as )?minhas rotinas\b/],
+  action: async () => {
+    const list = tasks.routines();
+    if (!list.length) return say('Você ainda não tem rotinas. Diga, por exemplo: "todo dia às 7h me dê as notícias", ou abra a Agenda e crie uma.', { ui: { panel: 'agenda' } });
+    return say(`Suas rotinas:\n${list.map((t, i) => `${i + 1}. ${tasks.describe(t)}`).join('\n')}`, { speech: `Você tem ${list.length} rotina${list.length > 1 ? 's' : ''}: ${list.map((t) => tasks.describe(t)).join('; ')}.`, ui: { panel: 'agenda' } });
+  },
+});
+
 registerCommand({
   name: 'task.add', module: 'TAREFAS', priority: 60, mutates: true, description: 'Adiciona tarefa',
   aliases: ['Adicione a tarefa trocar o óleo'],
@@ -588,7 +629,7 @@ registerCommand({
 registerCommand({
   name: 'task.cancel', module: 'TAREFAS', priority: 62, permission: 'confirm', description: 'Cancela tarefa/lembrete',
   aliases: ['Cancela essa tarefa', 'Cancela o lembrete 2'],
-  patterns: [/\b(cancel\w+|desmarc\w+|remov\w+|apag\w+) (essa |esta |a |o )?(tarefa|lembrete)\s*(\w+)?/],
+  patterns: [/\b(cancel\w+|desmarc\w+|remov\w+|apag\w+) (essa |esta |a |o )?(tarefa|lembrete|rotina)\s*(\w+)?/],
   params: (t, m, s) => ({ task: resolveTask(t, s) }),
   confirmText: ({ task }) => (task ? `Cancelar a tarefa "${task.text}"?` : null),
   action: async ({ task }) => { if (!task) return say('Não encontrei essa tarefa.'); tasks.cancel(task.id); return say(`Tarefa cancelada: ${task.text}.`); },
