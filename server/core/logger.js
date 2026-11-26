@@ -10,6 +10,7 @@ const LOG_FILE = path.join(LOG_DIR, 'jarvis.log');
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const RING_SIZE = 500;
 const ring = [];
+const QUIET_CONSOLE = new Set(['api', 'noticias']);
 let fileEnabled = process.env.JARVIS_LOG_TO_FILE !== '0';
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -39,7 +40,10 @@ function write(level, category, message, meta) {
       fs.appendFileSync(LOG_FILE, `${JSON.stringify(entry)}\n`);
     } catch { /* disco indisponível: mantém apenas em memória */ }
   }
-  if (process.env.JARVIS_LOG_CONSOLE !== '0' && (level === 'error' || level === 'warn' || process.env.JARVIS_DEBUG)) {
+  // Avisos de fontes externas (notícias, câmbio…) ficam só no Diagnóstico: sem internet
+  // eles encheriam o terminal e esconderiam o que importa. Erros sempre aparecem.
+  const quiet = level === 'warn' && QUIET_CONSOLE.has(category) && !process.env.JARVIS_DEBUG;
+  if (process.env.JARVIS_LOG_CONSOLE !== '0' && !quiet && (level === 'error' || level === 'warn' || process.env.JARVIS_DEBUG)) {
     console[level === 'error' ? 'error' : 'log'](`[${level}] ${category}: ${entry.message}`);
   }
   return entry;

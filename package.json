@@ -12,7 +12,8 @@
     "e2e": "node tests/e2e/run-e2e.js",
     "icons": "node scripts/make-icons.cjs",
     "test:all": "npm test && npm run e2e",
-    "backup": "node scripts/backup-data.js"
+    "backup": "node scripts/backup-data.js",
+    "celular": "sh scripts/celular.sh"
   },
   "engines": {
     "node": ">=18.17"

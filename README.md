@@ -39,6 +39,20 @@ Abra no **Chrome**, **Edge** ou no **Chrome do Android** e toque em **TOQUE PARA
 “Cérebro online… Ouvido online… Voz online… Memória online… JARVIS pronto.” com o
 estado **real** de cada parte.
 
+### No celular (Termux) — um comando só
+Depois da primeira instalação (Termux + `pkg install git nodejs ollama` + `git clone`):
+```bash
+cd ~/Jarvis-ia && npm run celular   # só na primeira vez
+jarvis                              # das próximas vezes
+```
+O comando impede o Android de fechar o Termux, baixa as atualizações (sem mexer em `data/`),
+liga o Ollama, baixa o modelo se faltar (`qwen2.5:0.5b`; outro: `AI_MODEL=qwen2.5:1.5b jarvis`)
+e inicia o JARVIS. Abra `http://localhost:3000` no Chrome.
+
+**Velocidade da IA no celular:** a resposta aparece palavra por palavra; cumprimentos respondem na
+hora sem IA; na primeira vez com cada modelo o JARVIS mede 2, 4 e 8 núcleos e salva o mais rápido
+(para medir de novo: diga “teste a velocidade da IA”).
+
 ## 2. Microfone, HTTPS e Android
 
 **Regra do navegador:** o microfone só funciona em **HTTPS** ou em `localhost`.
