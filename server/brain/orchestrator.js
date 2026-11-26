@@ -94,6 +94,11 @@ export async function dispatch(found, ctx) {
 // ---------- 4) Resposta falada: tamanho adaptado ao tipo ----------
 export function speechFrom(text, max) {
   let s = String(text || '')
+    // Só a informação: fontes, horários de atualização e rodapés ficam na tela, não na fala.
+    .replace(/\s*\((fontes?|via|dados d[aeo])\b[^)]*\)/gi, '')
+    .replace(/^\s*via\s*:.*$/gim, '')
+    .replace(/\s*[·•|]\s*(atualizad[oa] (em|às)|cache de)[^·•|\n]*/gi, '')
+    .replace(/\s*[·•|]?\s*\bfontes?\s*:[^.\n]*\.?/gi, '')
     .replace(/https?:\/\/\S+/g, '')
     .replace(/[*_#`>|]/g, '')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}]/gu, '')

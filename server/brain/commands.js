@@ -462,8 +462,8 @@ registerCommand({
 async function storiesCommand(parts, intro, ctx) {
   const summary = await news.getSummary({ parts });
   ctx.sess.context.activeModule = 'news';
-  const speech = `${intro} ${news.storiesSpeech(summary.stories)} Quer que eu aprofunde alguma delas?`;
-  return say(speech, { ui: { panel: 'news', news: summary } });
+  const stories = news.storiesSpeech(summary.stories);
+  return say(`${intro} ${stories} Quer que eu aprofunde alguma delas?`, { speech: stories || intro, ui: { panel: 'news', news: summary } });
 }
 
 registerCommand({
@@ -494,14 +494,14 @@ registerCommand({
   action: async (_, ctx) => {
     const summary = await news.getSummary();
     ctx.sess.context.activeModule = 'news';
-    const parts = ['Claro. Aqui está seu resumo.'];
+    const parts = [];
     const ex = news.exchangeText(summary.exchange);
     parts.push(summary.exchange?.ok || summary.exchange?.pending ? `${ex.speech}` : 'Não consegui confirmar a cotação atual neste momento.');
     const fu = news.fuelText(summary.fuel);
     parts.push(summary.fuel?.ok || summary.fuel?.pending ? fu.speech : 'Os preços de combustíveis da ANP não estão acessíveis agora.');
     parts.push(news.storiesSpeech(summary.stories));
-    parts.push('Quer que eu aprofunde alguma delas?');
-    return say(parts.join(' '), { ui: { panel: 'news', news: summary } });
+    const spoken = parts.filter(Boolean).join(' ');
+    return say(`${spoken} Quer que eu aprofunde alguma delas?`, { speech: spoken, ui: { panel: 'news', news: summary } });
   },
 });
 

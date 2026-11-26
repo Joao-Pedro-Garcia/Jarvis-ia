@@ -212,7 +212,8 @@ export function exchangeText(ex, only) {
   const text = rates.map((r) => `${r.flag} ${r.name}: R$ ${brl(r.value)}${r.changePct != null ? ` (${r.changePct >= 0 ? '▲' : '▼'} ${brl(Math.abs(r.changePct))}%)` : ''}`).join('\n')
     + `\n${rates[0].kind} · atualizado em ${when}${ex.fromCache ? ' (cache de até 1 min)' : ''} · Fonte: ${rates[0].source}`;
   const speech = rates.map((r) => `${r.name === 'Libra' ? 'a libra' : `o ${r.name.toLowerCase()}`} está em ${spokenMoney(r.value)}${r.changePct != null && Math.abs(r.changePct) >= 0.05 ? `, ${r.changePct > 0 ? 'alta' : 'queda'} de ${brl(Math.abs(r.changePct), 1)} por cento` : ''}`).join('; ');
-  return { text, speech: `${speech.charAt(0).toUpperCase()}${speech.slice(1)}. Cotação ${rates[0].kind.toLowerCase()}, atualizada às ${when.split(' ')[1]}. Fonte: ${rates[0].source.replace(/\s*\(.*\)$/, '')}.` };
+  // Fala só a informação (fonte e horário ficam na tela).
+  return { text, speech: `${speech.charAt(0).toUpperCase()}${speech.slice(1)}.` };
 }
 
 export function fuelText(f, which) {
@@ -228,17 +229,19 @@ export function fuelText(f, which) {
   const text = `Tocantins\n${filt(f.state.prices).map(line).join('\n')}\n\nBrasil\n${filt(f.brazil.prices).map(line).join('\n')}\n\n${f.method}. Semana ${period}. Fonte: ${f.source}.`;
   const sp = (arr) => filt(arr).map((p) => `${p.product.toLowerCase()} a ${spokenMoney(p.average)}`).join(', ');
   const warn = f.outdated ? ` Atenção: a pesquisa mais recente disponível termina em ${f.period.to.split('-').reverse().join('/')}.` : '';
-  return { text: `${text}${warn}`, speech: `No Tocantins, preço médio de ${sp(f.state.prices)}. Na média nacional, ${sp(f.brazil.prices)}. Pesquisa da ANP de ${period}.${warn}` };
+  return { text: `${text}${warn}`, speech: `No Tocantins, ${sp(f.state.prices)}. Na média nacional, ${sp(f.brazil.prices)}.${warn}` };
 }
 
 export function storiesSpeech(st) {
   if (!st) return '';
   if (st.error) return `${st.error}${st.cached && !st.pending ? ' Mostrei na tela as últimas notícias que obtive, com a data e a hora — elas não foram confirmadas agora.' : ''}`;
-  const say = (arr) => arr.slice(0, 3).map((s) => (s.repeated && s.update ? `Continua em destaque: ${s.title}. ${s.update}` : `${s.title}.`)).join(' ');
+  // Só o título (sem " - g1", " | CNN" etc. no fim): a fonte fica na tela.
+  const clean = (t) => String(t || '').replace(/\s+[-–—|]\s+[^-–—|]{2,40}$/, '').replace(/[.!?]*$/, '');
+  const say = (arr) => arr.slice(0, 3).map((s) => (s.repeated && s.update ? `${clean(s.title)}. ${s.update}` : `${clean(s.title)}.`)).join(' ');
   let out = '';
   if (st.brazil.length) out += ` No Brasil: ${say(st.brazil)}`;
   if (st.world.length) out += ` No mundo: ${say(st.world)}`;
-  if (st.curiosity) out += ` E uma curiosidade: ${st.curiosity.title}.`;
+  if (st.curiosity) out += ` Curiosidade: ${clean(st.curiosity.title)}.`;
   return out.trim();
 }
 
