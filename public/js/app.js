@@ -7,7 +7,7 @@ import { setState, getState } from './core/state.js';
 import { getSettings, applyServerSettings, saveSettings } from './core/settings.js';
 import { clientLog } from './core/logger.js';
 import { offlineAnswer, OFFLINE_NOTICE } from './core/offline-brain.js';
-import { listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
+import { configureStt, listenOnce, stopListening, hearingSupported, isListening, startBargeIn, stopBargeIn, lastListenOutcome, waitMicRelease, MIC_RELEASE_MS } from './modules/hearing.js';
 import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
@@ -102,6 +102,22 @@ function stopAll() { stopSpeaking(); stopBargeIn(); document.body.classList.remo
 function clientInfo() {
   return { mic: micStatus(), hearing: hearingSupported, voice: voiceSupported, notifications: notificationState() };
 }
+
+// ============================================================ ouvido (Whisper)
+// Com o Groq conectado, a transcrição é feita pelo Whisper (entende voz baixa e tom normal).
+let sttCheckedAt = 0;
+async function ensureStt(s = getSettings()) {
+  if (s?.hearing?.engine === 'browser') { configureStt({ enabled: false }); return; }
+  if (Date.now() - sttCheckedAt < 60000) return;
+  sttCheckedAt = Date.now();
+  try { const r = await api.get('/api/stt', { timeout: 2500 }); configureStt({ enabled: !!r.available }); } catch { /* mantém o último estado */ }
+}
+let sttWarned = false;
+bus.on('stt:fallback', ({ reason } = {}) => {
+  sttCheckedAt = 0;
+  if (sttWarned) return; sttWarned = true;
+  addMsg('system', `⚠️ A transcrição Whisper falhou (${reason}). Usando o reconhecimento do Google por 1 minuto. Fale de novo.`);
+});
 
 // ============================================================ modo dormindo
 // Dormindo: tela apagada, só escuta duas palmas ou a palavra "Jarvis". Acorda com qualquer uma.
@@ -279,6 +295,7 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
   // Só mostra OUVINDO quando o navegador confirmar (evento LISTEN_STARTED).
   setState('standby', 'ATIVANDO MICROFONE');
   const s = getSettings();
+  await ensureStt(s);
   try {
     const listening = listenOnce({ lang: s?.hearing?.lang || 'pt-BR', silenceMs: s?.hearing?.silenceMs || 1800 });
     listenStarting = false; // a escuta já começou: um novo toque passa a encerrá-la
@@ -291,8 +308,8 @@ async function startListening({ chime = true, greet = null, quiet = false } = {}
       // quiet: true → nunca avisa (escuta automática); 'silence' → só avisa se ouviu voz (palmas/"Jarvis").
       if (quiet !== true && !(quiet === 'silence' && !o.speech) && o.error !== 'aborted') {
         const why = !o.started ? 'O microfone não chegou a abrir. Toque no microfone de novo.'
-          : !o.speech ? `Não ouvi sua voz. Fale logo depois do sinal, perto do microfone.${getSettings()?.clap?.enabled ? ' Se continuar, desligue as palmas em Configurações (elas usam o mesmo microfone).' : ''}${isAndroid ? ' Confira também a permissão de microfone do app Google.' : ''}`
-          : 'Ouvi sua voz, mas não consegui transcrever. Fale um pouco mais devagar e perto do microfone.';
+          : !o.speech ? `Não ouvi sua voz. Fale logo depois do sinal, perto do microfone.${getSettings()?.clap?.enabled ? ' Se continuar, desligue as palmas em Configurações (elas usam o mesmo microfone).' : ''}${isAndroid && o.engine !== 'whisper' ? ' Confira também a permissão de microfone do app Google.' : ''}`
+          : o.engine === 'whisper' ? 'Ouvi sua voz, mas o áudio não virou texto. Tente de novo.' : 'Ouvi sua voz, mas não consegui transcrever. Fale um pouco mais devagar e perto do microfone.';
         addMsg('system', `🎙 ${why}`);
         clientLog('ouvido', `Nada transcrito: microfone ${o.started ? 'abriu' : 'não abriu'}, voz ${o.speech ? 'detectada' : 'não detectada'}${o.error ? `, erro ${o.error}` : ''}`, 'warn');
       }
@@ -438,6 +455,7 @@ function applySettings(s, changedKey) {
       .catch((e) => { toast(e.message); saveSettings({ clap: { enabled: false } }); });
   }
   if (changedKey === 'hearing.wakeWord') wake?.setWakeWord(s.hearing.wakeWord, s);
+  if (changedKey === 'hearing.engine' || changedKey === 'boot') { sttCheckedAt = 0; ensureStt(s); }
   if (changedKey === 'ui.keepAwake' || changedKey === 'boot') setKeepAwake(!!s.ui.keepAwake).then((ok) => { if (s.ui.keepAwake && !ok) toast('Este navegador não permite manter a tela ligada.'); });
   if (changedKey === 'voice.silent' && s.voice.silent) stopAll();
   if (changedKey === 'test-voice') {

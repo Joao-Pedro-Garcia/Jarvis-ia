@@ -99,3 +99,52 @@ export const groqProvider = {
 
 /** Falhas em que vale usar a IA do celular no lugar (sem internet, lento, limite, fora do ar). */
 export const shouldFallback = (err) => err instanceof TypeError || /fetch failed|sem conexão|tempo de resposta/i.test(err.message) || err.status === 0 || err.status === 429 || err.status >= 500;
+
+// ---------- OUVIDO: transcrição Whisper (gratuita no Groq, mesma chave) ----------
+// O áudio gravado no celular é enviado ao Groq só para virar texto.
+export const STT_MODELS = () => [...new Set([process.env.GROQ_STT_MODEL, 'whisper-large-v3-turbo', 'whisper-large-v3'].filter(Boolean))];
+const STT_PROMPT = 'Conversa em português do Brasil com o assistente Jarvis. Araguaína, Tocantins, Bíblia, Groq.';
+// Frases que o Whisper costuma "inventar" em silêncio/ruído (vindas de legendas de vídeos).
+const HALLUCINATIONS = [
+  /legendas? (pela|por) (comunidade )?amara\.org/i, /legenda(s|do)? (por|pela) [\w\s]+$/i, /inscreva-se( no canal)?/i,
+  /^(obrigad[oa]|muito obrigad[oa])( por assistir(em)?)?[.!]?$/i, /^(tchau|e aí)[.!]?$/i, /^\W*$/,
+];
+export function cleanTranscript(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return HALLUCINATIONS.some((re) => re.test(t)) ? '' : t;
+}
+export const sttAvailable = () => !!key();
+
+/** Áudio (Buffer) → texto. Erros com .status (401 chave, 429 limite, 0 rede). */
+export async function transcribe(buf, mime = 'audio/webm', { language = 'pt', timeoutMs = 20000 } = {}) {
+  const k = key();
+  if (!k) throw Object.assign(new Error('Groq não conectado (cole a chave em Configurações → INTELIGÊNCIA)'), { status: 503, code: 'NO_KEY' });
+  const type = String(mime).split(';')[0] || 'audio/webm';
+  const ext = /ogg/.test(type) ? 'ogg' : /mp4|m4a|aac/.test(type) ? 'm4a' : /wav/.test(type) ? 'wav' : /mpeg|mp3/.test(type) ? 'mp3' : 'webm';
+  let lastErr;
+  for (const model of STT_MODELS()) {
+    const fd = new FormData();
+    fd.append('file', new Blob([buf], { type }), `fala.${ext}`);
+    fd.append('model', model);
+    fd.append('language', language);
+    fd.append('temperature', '0');
+    fd.append('response_format', 'json');
+    fd.append('prompt', STT_PROMPT);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, { method: 'POST', headers: { Authorization: `Bearer ${k}` }, body: fd, signal: ctrl.signal });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const err = Object.assign(new Error(data?.error?.message || `HTTP ${res.status}`), { status: res.status });
+        if ((res.status === 404 || res.status === 400) && /model/i.test(err.message)) { lastErr = err; continue; } // modelo retirado → tenta o próximo
+        throw err;
+      }
+      return { text: cleanTranscript(data?.text), model };
+    } catch (err) {
+      if (err.name === 'AbortError') throw Object.assign(new Error('tempo de resposta esgotado'), { status: 0 });
+      throw err;
+    } finally { clearTimeout(t); }
+  }
+  throw lastErr || new Error('nenhum modelo de transcrição disponível');
+}

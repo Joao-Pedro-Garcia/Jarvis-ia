@@ -67,6 +67,16 @@ async function readBody(req, limit = 64 * 1024) {
   });
 }
 
+/** Corpo binário (áudio), com limite de tamanho. */
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error('Áudio grande demais'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 // Limite simples de requisições por IP (evita abuso e gastos com a API).
 const hits = new Map();
 setInterval(() => { // limpeza periódica (evita crescimento infinito do mapa)
@@ -256,6 +266,25 @@ async function api(req, res, url) {
     // Bom dia criativo ao acordar (IA online se responder rápido; senão frases próprias) + clima real.
     case 'GET /api/greeting': return send(res, 200, await greeting.wakeGreeting());
     case 'GET /api/weather': return send(res, 200, await weather.getWeather());
+    // OUVIDO: transcrição Whisper no Groq (gratuita, mesma chave). Sem chave → 503 e o navegador usa o reconhecimento do Google.
+    case 'GET /api/stt': return send(res, 200, { available: groq.sttAvailable(), provider: groq.sttAvailable() ? 'Groq Whisper' : null });
+    case 'POST /api/stt': {
+      if (rateLimited(ip, 'stt', 60)) return send(res, 429, { error: 'Muitas transcrições seguidas. Aguarde um instante.' });
+      const type = String(req.headers['content-type'] || '');
+      if (!/^audio\//.test(type)) return send(res, 415, { error: 'Envie o áudio (audio/webm, audio/ogg, audio/mp4 ou audio/wav)' });
+      const audio = await readRaw(req, 8 * 1024 * 1024);
+      if (audio.length < 1000) return send(res, 200, { text: '', reason: 'áudio curto demais' });
+      try {
+        const t0 = Date.now();
+        const r = await groq.transcribe(audio, type);
+        log.info('ouvido', `Transcrição Whisper: ${r.text ? `${r.text.length} caracteres` : 'vazia'} em ${Date.now() - t0} ms`);
+        return send(res, 200, { text: r.text, model: r.model, ms: Date.now() - t0 });
+      } catch (err) {
+        const msg = err.code === 'NO_KEY' ? err.message : groq.groqProvider.friendlyError(err);
+        log.warn('ouvido', `Transcrição Whisper falhou: ${msg}`);
+        return send(res, err.status === 401 || err.status === 403 ? 401 : 503, { error: msg });
+      }
+    }
     case 'GET /api/tts': return send(res, 200, tts.ttsStatus());
     case 'GET /api/tts/test': return send(res, 200, await tts.testNeural({ voice: url.searchParams.get('voice') || undefined }));
     case 'POST /api/tts': {

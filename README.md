@@ -119,6 +119,14 @@ e no comando “voz masculina”). Opções extras em Configurações → VOZ: *
 serviço não oficial do Edge — no teste real no celular foi recusada com HTTP 403) e *voz robótica offline*
 (eSpeak, `pkg install espeak`).
 
+### Ouvido com Whisper (voz baixa e tom normal)
+Com a chave do Groq salva, a sua fala é gravada pelo próprio microfone da página e transcrita pelo **Whisper**
+(`whisper-large-v3-turbo`, gratuito no Groq, mesma chave). O fim da fala é detectado pelo silêncio, com limiar que
+se adapta ao ruído do ambiente e ganho automático para voz baixa; silêncio puro não é enviado. Frases que o Whisper
+“inventa” no silêncio (ex.: “Legendas pela comunidade Amara.org”) são descartadas. Se o Whisper falhar, volta para
+o reconhecimento do Google por 1 minuto. O áudio passa pelos servidores do Groq. Configurações → MICROFONE →
+“Transcrição da voz”. A ativação por “Jarvis” e o “pare” continuam no reconhecimento do navegador.
+
 ### Começa dormindo · bom dia · clima
 Ao abrir, o JARVIS **começa dormindo** (tela escura, mantida ligada para ouvir). Acorda com **duas palmas**
 (principal) ou dizendo **“Jarvis”**: a tela acende, ele dá um **bom dia criativo** (frase da IA online quando

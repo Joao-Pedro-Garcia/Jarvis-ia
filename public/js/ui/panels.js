@@ -134,6 +134,8 @@ export async function showSettings({ onChange } = {}) {
         <button class="btn small" id="test-voice" type="button">Testar voz</button>
       </fieldset>
       <fieldset class="fieldset"><legend>MICROFONE / OUVIDO</legend>
+        <div class="field"><label>Transcrição da voz</label><select data-k="hearing.engine"><option value="auto" ${s.hearing.engine !== 'browser' ? 'selected' : ''}>Whisper pelo Groq (entende voz baixa; precisa da chave do Groq)</option><option value="browser" ${s.hearing.engine === 'browser' ? 'selected' : ''}>Reconhecimento do Google (do navegador)</option></select></div>
+        <p class="hint">${online?.configured ? '🟢 Groq conectado: a sua voz é gravada aqui e transcrita pelo Whisper no Groq (o áudio passa pelos servidores do Groq).' : '⚪ Sem a chave do Groq, o JARVIS usa o reconhecimento do Google.'}</p>
         <label class="switch">Conversa contínua (ouve de novo após perguntas) <input type="checkbox" data-k="hearing.continuousConversation" ${s.hearing.continuousConversation ? 'checked' : ''}></label>
         <label class="switch">Ativação por voz (“Jarvis, …”) <input type="checkbox" data-k="hearing.wakeWord" ${s.hearing.wakeWord ? 'checked' : ''}></label>
         <p class="hint">A ativação por voz mantém o reconhecimento do navegador ligado — no Chrome o áudio é processado pelo serviço do Google. Deixe desligado se preferir privacidade máxima.</p>
