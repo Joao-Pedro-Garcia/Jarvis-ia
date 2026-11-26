@@ -408,7 +408,7 @@ function applySettings(s, changedKey) {
   document.body.classList.toggle('eco', eco);
   document.body.classList.toggle('no-anim', !s.ui.animations);
   core?.configure({ eco, particles: s.ui.particles, animations: s.ui.animations });
-  configureVoice({ rate: s.voice.rate, volume: s.voice.volume, pitch: s.voice.pitch, lang: s.voice.lang, voiceName: s.voice.voiceName });
+  configureVoice({ rate: s.voice.rate, volume: s.voice.volume, pitch: s.voice.pitch, lang: s.voice.lang, voiceName: s.voice.voiceName, engine: s.voice.engine, neuralVoice: s.voice.neuralVoice });
   wake?.configure(s);
   // Modo econômico: menos atualizações de status.
   clearInterval(statusTimer); statusTimer = setInterval(refreshStatus, eco ? 180000 : 60000);

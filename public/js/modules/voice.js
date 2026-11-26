@@ -1,12 +1,13 @@
-// VOZ — síntese de fala local do navegador (Web Speech Synthesis).
+// VOZ — 1) voz do JARVIS (gerada no servidor: masculina e natural, /api/tts);
+//        2) reserva: síntese do próprio navegador/celular (Web Speech Synthesis).
 import { bus, EVENTS } from '../core/bus.js';
 import { clientLog } from '../core/logger.js';
 
 const synth = window.speechSynthesis;
-export const voiceSupported = !!synth;
+export const voiceSupported = !!synth || typeof Audio !== 'undefined';
 let voices = [];
 let speakingToken = 0;
-let opts = { rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '' };
+let opts = { rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', engine: 'jarvis', neuralVoice: '' };
 let lastPlayback = null; // última vez que o navegador CONFIRMOU o início de uma fala (evento onstart)
 export const lastPlaybackAt = () => lastPlayback;
 
@@ -27,33 +28,117 @@ function pickVoice() {
 
 export function configureVoice(o) { opts = { ...opts, ...o }; }
 
-/** Divide em frases (Chrome corta falas muito longas). */
-function chunks(text) {
-  const parts = text.match(/[^.!?;:]+[.!?;:]*\s*/g) || [text];
+/**
+ * Divide em blocos só no fim de frases (. ! ?), nunca em vírgula/dois-pontos:
+ * cada bloco a mais é uma pausa a mais. `first` deixa o 1º bloco curto para a
+ * fala começar mais rápido.
+ */
+export function chunks(text, max = 300, first = max) {
+  const parts = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
   const out = []; let cur = '';
   for (const p of parts) {
-    if ((cur + p).length > 180 && cur) { out.push(cur.trim()); cur = ''; }
+    const lim = out.length ? max : first;
+    if ((cur + p).length > lim && cur) { out.push(cur.trim()); cur = ''; }
     cur += p;
   }
   if (cur.trim()) out.push(cur.trim());
   return out;
 }
 
-export function isSpeaking() { return !!synth && (synth.speaking || synth.pending); }
+export function isSpeaking() { return audioActive || (!!synth && (synth.speaking || synth.pending)); }
+
+// ---------- voz do JARVIS (servidor) ----------
+let audioEl = null;
+let audioActive = false;
+let serverDownUntil = 0;
+let lastEngine = null;
+const urls = new Set();
+const player = () => (audioEl ||= new Audio());
+export const usingJarvisVoice = () => opts.engine === 'jarvis' && Date.now() >= serverDownUntil;
+
+async function fetchAudio(text) {
+  const res = await fetch('/api/tts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice: opts.neuralVoice || undefined, rate: opts.rate, pitch: opts.pitch }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  lastEngine = res.headers.get('X-Voice-Engine') || 'neural';
+  const url = URL.createObjectURL(await res.blob());
+  urls.add(url);
+  return url;
+}
+const freeUrl = (u) => { if (u && urls.delete(u)) URL.revokeObjectURL(u); };
+
+function playUrl(url, token) {
+  return new Promise((resolve, reject) => {
+    const a = player();
+    a.volume = Math.min(Math.max(opts.volume, 0), 1);
+    let t = null;
+    const end = (ok, err) => { clearInterval(t); a.onended = a.onerror = a.onplaying = null; freeUrl(url); ok ? resolve() : reject(err); };
+    a.onplaying = () => { lastPlayback = new Date().toISOString(); };
+    a.onended = () => end(true);
+    a.onerror = () => (token !== speakingToken ? end(true) : end(false, new Error('o navegador não tocou o áudio')));
+    t = setInterval(() => { if (token !== speakingToken) end(true); else if (!a.paused) bus.emit(EVENTS.SPEECH_BOUNDARY); }, 250);
+    a.src = url;
+    a.play().catch((e) => (token !== speakingToken ? end(true) : end(false, e)));
+  });
+}
+
+/** Fala pela voz do JARVIS. Lança erro se nem o 1º bloco sair (o chamador usa a reserva). */
+async function speakServer(text, token) {
+  const list = chunks(text, 280, 140);
+  let next = fetchAudio(list[0]);
+  next.catch(() => {});
+  audioActive = true;
+  try {
+    for (let i = 0; i < list.length; i++) {
+      let url;
+      try { url = await next; } catch (err) {
+        if (i === 0) throw err;
+        // Caiu no meio: o resto sai pela voz do celular.
+        audioActive = false;
+        return token === speakingToken ? speakBrowser(list.slice(i).join(' '), token, false) : false;
+      }
+      if (token !== speakingToken) { freeUrl(url); return false; }
+      if (i + 1 < list.length) { next = fetchAudio(list[i + 1]); next.catch(() => {}); } // baixa o próximo enquanto este toca: sem pausa
+      await playUrl(url, token);
+      if (token !== speakingToken) return false;
+    }
+    return true;
+  } finally { if (token === speakingToken) audioActive = false; }
+}
 
 /** Fala o texto. Resolve quando termina (ou foi interrompido). */
-export function speak(text) {
-  if (!synth || !text) return Promise.resolve(false);
+export async function speak(text) {
+  if (!text) return false;
   stopSpeaking();
   const token = ++speakingToken;
+  bus.emit(EVENTS.SPEECH_STARTED, { text });
+  if (usingJarvisVoice()) {
+    try {
+      const ok = await speakServer(text, token);
+      if (token === speakingToken) bus.emit(EVENTS.SPEECH_FINISHED, { completed: ok });
+      return ok;
+    } catch (err) {
+      audioActive = false;
+      if (token !== speakingToken) return false;
+      serverDownUntil = Date.now() + 60000;
+      clientLog('voz', `Voz do JARVIS indisponível (${err.message}); usando a voz do celular`, 'warn');
+    }
+  }
+  if (!synth) { bus.emit(EVENTS.SPEECH_FINISHED, { completed: false }); return false; }
+  return speakBrowser(text, token);
+}
+
+function speakBrowser(text, token, emit = true) {
+  if (!synth) return Promise.resolve(false);
   const list = chunks(text);
   const voice = pickVoice();
-  bus.emit(EVENTS.SPEECH_STARTED, { text });
   return new Promise((resolve) => {
     let i = 0;
     // Chrome às vezes pausa sozinho em falas longas: "keepalive".
     const keep = setInterval(() => { if (synth.speaking && !synth.paused && !paused) { synth.pause(); synth.resume(); } }, 10000);
-    const done = (completed) => { clearInterval(keep); if (token === speakingToken) bus.emit(EVENTS.SPEECH_FINISHED, { completed }); resolve(completed); };
+    const done = (completed) => { clearInterval(keep); if (emit && token === speakingToken) bus.emit(EVENTS.SPEECH_FINISHED, { completed }); resolve(completed); };
     const next = () => {
       if (token !== speakingToken) return done(false);
       if (i >= list.length) return done(true);
@@ -82,6 +167,9 @@ export function speak(text) {
 export function stopSpeaking() {
   speakingToken++;
   paused = false;
+  if (audioEl) { audioEl.pause(); audioEl.removeAttribute('src'); audioEl.load(); }
+  audioActive = false;
+  for (const u of [...urls]) freeUrl(u);
   if (synth) synth.cancel();
 }
 
@@ -89,18 +177,29 @@ export function stopSpeaking() {
 let paused = false;
 export const isPaused = () => paused;
 export function pauseSpeaking() {
-  if (!synth || !isSpeaking()) return false;
-  synth.pause(); paused = true; bus.emit('speech:paused');
+  if (!isSpeaking()) return false;
+  if (audioActive) audioEl?.pause(); else if (synth) synth.pause(); else return false;
+  paused = true; bus.emit('speech:paused');
   return true;
 }
 export function resumeSpeaking() {
-  if (!synth || !paused) return false;
-  synth.resume(); paused = false; bus.emit('speech:resumed');
+  if (!paused) return false;
+  if (audioActive) audioEl?.play().catch(() => {}); else if (synth) synth.resume();
+  paused = false; bus.emit('speech:resumed');
   return true;
 }
 
 /** Alguns navegadores (iOS/Android) exigem um gesto do usuário antes de falar. */
 export function unlockVoice() {
+  // Libera o <audio> da voz do JARVIS com um toque de silêncio (WAV de 10 ms).
+  try {
+    const n = 240; const b = new ArrayBuffer(44 + n * 2); const v = new DataView(b);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 24000, true); v.setUint32(28, 48000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+    const a = player(); const url = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+    a.src = url; a.play().catch(() => {}).finally(() => setTimeout(() => URL.revokeObjectURL(url), 500));
+  } catch { /* sem áudio */ }
   if (!synth) return;
   const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u);
 }
@@ -117,7 +216,10 @@ export function waitVoices(ms = 1500) {
   });
 }
 
-export const voiceInfo = () => { const v = pickVoice(); return v ? { name: v.name, lang: v.lang, local: v.localService } : null; };
+export const voiceInfo = () => {
+  if (usingJarvisVoice() && lastEngine) return { name: lastEngine === 'espeak' ? 'Voz do JARVIS (eSpeak, offline)' : 'Voz do JARVIS (neural, online)', lang: opts.lang, local: lastEngine === 'espeak' };
+  const v = pickVoice(); return v ? { name: v.name, lang: v.lang, local: v.localService } : null;
+};
 
 /**
  * TESTE REAL da síntese de voz: suporte, vozes instaladas, idioma, volume,

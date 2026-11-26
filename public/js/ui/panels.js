@@ -86,9 +86,9 @@ export async function showMemory(sessionHistory = []) {
 
 // ---------------- CONFIGURAÇÕES ----------------
 export async function showSettings({ onChange } = {}) {
-  const [s, personality, bible, booksRes, status, online] = await Promise.all([
+  const [s, personality, bible, booksRes, status, online, ttsInfo] = await Promise.all([
     Promise.resolve(getSettings()), api.get('/api/personality').catch(() => null), api.get('/api/bible/settings').catch(() => null), api.get('/api/bible/books').catch(() => ({ books: [] })), api.get('/api/status').catch(() => null),
-    api.get('/api/ai/online').catch(() => null),
+    api.get('/api/ai/online').catch(() => null), api.get('/api/tts').catch(() => null),
   ]);
   const aiStatus = status?.llm;
   openSheet('settings', 'CONFIGURAÇÕES', (body) => {
@@ -111,7 +111,10 @@ export async function showSettings({ onChange } = {}) {
       </fieldset>
       <fieldset class="fieldset"><legend>VOZ</legend>
         <label class="switch">Responder por voz <input type="checkbox" data-k="voice.enabled" ${s.voice.enabled ? 'checked' : ''}></label>
-        <div class="field"><label>Voz</label><select data-k="voice.voiceName"><option value="">Automática (${esc(s.voice.lang)})</option>${voices.map((v) => `<option ${v.name === s.voice.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Voz do JARVIS</label><select data-k="voice.engine"><option value="jarvis" ${s.voice.engine !== 'celular' ? 'selected' : ''}>Voz própria do JARVIS (masculina, natural)</option><option value="celular" ${s.voice.engine === 'celular' ? 'selected' : ''}>Voz do celular (Android)</option></select></div>
+        <div class="field"><label>Voz própria</label><select data-k="voice.neuralVoice">${(ttsInfo?.voices || [{ id: 'pt-BR-AntonioNeural', name: 'Antônio (português do Brasil)' }]).map((v) => `<option value="${esc(v.id)}" ${v.id === (s.voice.neuralVoice || ttsInfo?.defaultVoice || 'pt-BR-AntonioNeural') ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <p class="hint">A voz própria precisa de internet e é gerada por um serviço gratuito e não oficial (o “Ler em voz alta” do Edge): o texto falado passa pela Microsoft. Sem internet, ${ttsInfo?.espeak ? 'o JARVIS usa a voz offline eSpeak (robótica)' : 'o JARVIS usa a voz do celular (para ter uma voz masculina offline, robótica: <b>pkg install espeak</b> no Termux)'}.</p>
+        <div class="field"><label>Voz do celular (reserva)</label><select data-k="voice.voiceName"><option value="">Automática (${esc(s.voice.lang)})</option>${voices.map((v) => `<option ${v.name === s.voice.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Velocidade: <span data-out="voice.rate">${s.voice.rate}</span></label><input type="range" min="0.6" max="1.8" step="0.05" value="${s.voice.rate}" data-k="voice.rate" data-num></div>
         <div class="field"><label>Volume: <span data-out="voice.volume">${s.voice.volume}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.voice.volume}" data-k="voice.volume" data-num></div>
         <div class="field"><label>Idioma da voz e do ouvido</label><select data-k="voice.lang" data-mirror="hearing.lang">${['pt-BR', 'pt-PT', 'en-US', 'es-ES'].map((l) => `<option ${l === s.voice.lang ? 'selected' : ''}>${l}</option>`).join('')}</select></div>

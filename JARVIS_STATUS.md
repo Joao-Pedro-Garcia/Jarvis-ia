@@ -46,7 +46,7 @@ falsa controlada (porque o recurso real não existe neste ambiente) · **NÃO TE
 | Notificações | Só com o app aberto ou em segundo plano; com o app fechado exigiria servidor de push. Se estiverem bloqueadas, o diagnóstico mostra **ATIVAR NOTIFICAÇÕES** e o passo a passo. |
 | Combustíveis | O gov.br às vezes recusa acesso automatizado → "Dados indisponíveis no momento." (o bloqueio não é contornado). |
 | IA do navegador | Experimental: só em Chrome recente para computador, com o recurso ativado. |
-| Voz | Qualidade depende das vozes instaladas no aparelho; sem voz pt-BR o diagnóstico mostra LIMITADO com o motivo. |
+| Voz | Voz própria do JARVIS (masculina, neural: Antônio) gerada no servidor por um serviço gratuito e NÃO oficial ("Ler em voz alta" do Edge) — precisa de internet e o texto falado passa pela Microsoft; testada só com servidor simulado. Sem ela: eSpeak offline (se instalado) ou a voz do celular, cuja qualidade depende das vozes instaladas. |
 
 ## INDISPONÍVEL
 

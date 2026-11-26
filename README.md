@@ -111,6 +111,13 @@ isso”) e, quando não sabe, **diz que não sabe** — nunca finge ser uma IA.
 Provedores online continuam suportados (`AI_PROVIDER=anthropic|openai`, chave só no servidor),
 mas **nenhuma função depende deles**. Para provedores novos, crie um arquivo em `server/brain/ai/`.
 
+### Voz do JARVIS (masculina)
+Configurações → VOZ → **Voz do JARVIS**: *Voz própria* (padrão: **Antônio**, voz neural masculina) ou *Voz do celular*.
+A voz própria é gerada no servidor pelo serviço gratuito e **não oficial** do “Ler em voz alta” do Microsoft Edge:
+sem chave e sem cadastro, mas precisa de internet e o texto falado passa pela Microsoft. O próximo trecho é
+baixado enquanto o atual toca (sem pausas) e frases repetidas saem do cache. Se o serviço falhar, o JARVIS usa
+o eSpeak offline (voz robótica; `pkg install espeak` no Termux) ou a voz do celular — sozinho, sem travar.
+
 ## 4. O que funciona offline e online
 
 | Sem internet (servidor acessível) | Precisa de internet |

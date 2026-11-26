@@ -24,6 +24,7 @@ const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
 const chats = await import('./core/chats.js');
 const groq = await import('./brain/ai/groq.js');
+const tts = await import('./modules/voice/tts.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -248,6 +249,16 @@ async function api(req, res, url) {
       groq.removeKey();
       log.info('cerebro', 'IA online (Groq) removida; voltando para a IA local');
       return send(res, 200, { ok: true, status: await llm.refresh({ force: true }) });
+    }
+    // Voz do JARVIS: texto → áudio (MP3 da voz neural ou WAV do eSpeak). 503 = o navegador usa a voz do celular.
+    case 'GET /api/tts': return send(res, 200, tts.ttsStatus());
+    case 'POST /api/tts': {
+      if (rateLimited(ip, 'tts', 240)) return send(res, 429, { error: 'Muitas falas seguidas. Aguarde um instante.' });
+      const body = await readBody(req);
+      try {
+        const out = await tts.speakToAudio(body.text, { voice: body.voice, rate: body.rate, pitch: body.pitch, engine: body.engine });
+        return send(res, 200, out.audio, { 'Content-Type': out.type, 'X-Voice-Engine': out.engine, 'Cache-Control': 'no-store' });
+      } catch (err) { return send(res, err.status || 503, { error: err.message }); }
     }
     case 'GET /api/selftest': {
       if (rateLimited(ip, 'selftest', 6)) return send(res, 429, { error: 'Aguarde antes de repetir o diagnóstico.' });
