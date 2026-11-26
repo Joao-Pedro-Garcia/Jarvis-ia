@@ -11,8 +11,10 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 
 const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-const CHROMIUM_FULL = '140.0.3485.14';
-const CHROMIUM_MAJOR = CHROMIUM_FULL.split('.')[0];
+// O servidor recusa (403) versões do Edge que ele não aceita mais: tenta da mais nova
+// para a mais antiga e lembra a que funcionou. JARVIS_EDGE_VERSION força uma versão.
+const VERSIONS = [...new Set([process.env.JARVIS_EDGE_VERSION, '143.0.3650.75', '140.0.3485.14', '130.0.2849.68'].filter(Boolean))];
+let versionIdx = 0;
 const DEFAULT_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
 const endpoint = () => process.env.JARVIS_EDGE_TTS_URL || DEFAULT_URL;
 
@@ -90,13 +92,34 @@ export const encodeFrame = frame;
  * Converte texto em MP3 (24 kHz). Resolve com um Buffer.
  * Erros têm .status (403 = recusado, 0 = rede/tempo).
  */
-export function synthesize(text, { voice, rate, pitch, timeoutMs = 8000 } = {}, retried = false) {
+export async function synthesize(text, o = {}) {
+  let skewTried = false;
+  for (let n = 0; ;) {
+    try { return await attempt(text, o, VERSIONS[versionIdx]); } catch (err) {
+      if (err.status !== 403) throw err;
+      // 403: primeiro acerta o relógio pela hora do servidor; depois troca a versão do Edge.
+      if (!skewTried && err.serverDate) {
+        skewTried = true;
+        const server = Date.parse(err.serverDate) / 1000;
+        if (Number.isFinite(server) && Math.abs(server - (Date.now() / 1000 + clockSkew)) > 60) { clockSkew = server - Date.now() / 1000; continue; }
+      }
+      if (++n >= VERSIONS.length) throw err;
+      versionIdx = (versionIdx + 1) % VERSIONS.length;
+    }
+  }
+}
+
+/** Cookie MUID aleatório (o servidor passou a exigir, como no navegador). */
+const muid = crypto.randomBytes(16).toString('hex').toUpperCase();
+
+function attempt(text, { voice, rate, pitch, timeoutMs = 8000 } = {}, version) {
+  const major = version.split('.')[0];
   return new Promise((resolve, reject) => {
     const connId = crypto.randomUUID().replace(/-/g, '');
     const u = new URL(endpoint());
     u.searchParams.set('TrustedClientToken', TRUSTED_CLIENT_TOKEN);
     u.searchParams.set('Sec-MS-GEC', secMsGec());
-    u.searchParams.set('Sec-MS-GEC-Version', `1-${CHROMIUM_FULL}`);
+    u.searchParams.set('Sec-MS-GEC-Version', `1-${version}`);
     u.searchParams.set('ConnectionId', connId);
     const secure = u.protocol === 'wss:';
     const port = Number(u.port) || (secure ? 443 : 80);
@@ -117,8 +140,9 @@ export function synthesize(text, { voice, rate, pitch, timeoutMs = 8000 } = {}, 
         `Sec-WebSocket-Key: ${key}`, 'Sec-WebSocket-Version: 13',
         'Pragma: no-cache', 'Cache-Control: no-cache',
         'Origin: chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
-        `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR}.0.0.0`,
-        'Accept-Encoding: gzip, deflate, br', 'Accept-Language: en-US,en;q=0.9',
+        `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36 Edg/${major}.0.0.0`,
+        `Cookie: muid=${muid};`,
+        'Accept-Language: en-US,en;q=0.9',
         '', '',
       ].join('\r\n'));
     });
@@ -138,17 +162,10 @@ export function synthesize(text, { voice, rate, pitch, timeoutMs = 8000 } = {}, 
         buf = buf.subarray(end + 4);
         const status = Number(head.split(' ')[1]);
         if (status !== 101) {
-          // 403 costuma ser relógio do celular fora da hora: ajusta pelo relógio do servidor e tenta 1 vez.
           const date = /\r\ndate:\s*([^\r\n]+)/i.exec(head)?.[1];
-          if (status === 403 && date && !retried) {
-            const server = Date.parse(date) / 1000;
-            if (Number.isFinite(server)) {
-              clockSkew = server - Date.now() / 1000;
-              finished = true; clearTimeout(timer); sock.destroy();
-              return synthesize(text, { voice, rate, pitch, timeoutMs }, true).then(resolve, reject);
-            }
-          }
-          return fail(`servidor de voz recusou (HTTP ${status || '?'})`, status || 0);
+          if (finished) return;
+          finished = true; clearTimeout(timer); sock.destroy();
+          return reject(Object.assign(new Error(`servidor de voz recusou (HTTP ${status || '?'})`), { status: status || 0, serverDate: date }));
         }
         upgraded = true;
         start();

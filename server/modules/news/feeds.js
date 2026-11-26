@@ -58,13 +58,27 @@ export function parseFeed(xml, source) {
   return items;
 }
 
+/**
+ * Decodifica o feed respeitando o charset (cabeçalho HTTP ou <?xml encoding?>).
+ * Feeds em ISO-8859-1 lidos como UTF-8 viravam "esfor�o".
+ */
+export function decodeFeed(bytes, contentType = '') {
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 200));
+  const declared = /charset=["']?([\w-]+)/i.exec(contentType || '')?.[1] || /<\?xml[^>]*encoding=["']([\w-]+)["']/i.exec(head)?.[1] || 'utf-8';
+  let text;
+  try { text = new TextDecoder(declared.toLowerCase()).decode(bytes); } catch { text = new TextDecoder('utf-8').decode(bytes); }
+  // Charset declarado errado (comum): UTF-8 com caracteres inválidos → tenta Windows-1252/Latin-1.
+  if (text.includes('\uFFFD')) { const alt = new TextDecoder('latin1').decode(bytes); if (!alt.includes('\uFFFD')) text = alt; }
+  return text;
+}
+
 /** Busca todos os feeds em paralelo; falhas individuais não derrubam o módulo. */
 export async function fetchAll() {
   return cached('feeds', TTL, async () => {
     const list = sources();
     const results = await Promise.allSettled(list.map(async (src) => {
       const res = await fetchWithTimeout(src.url, { timeout: 10000, headers: { Accept: 'application/rss+xml, application/xml, text/xml, */*' } });
-      return parseFeed(await res.text(), src);
+      return parseFeed(decodeFeed(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type')), src);
     }));
     const items = [];
     const failed = [];

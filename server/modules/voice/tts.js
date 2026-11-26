@@ -22,7 +22,8 @@ export function findEspeak() {
   espeakBin = null;
   if (process.env.JARVIS_ESPEAK === '0') return null;
   for (const bin of ['espeak-ng', 'espeak']) {
-    try { if (spawnSync(bin, ['--version'], { timeout: 3000 }).status === 0) { espeakBin = bin; break; } } catch { /* não instalado */ }
+    // Basta o programa existir (algumas versões devolvem código ≠ 0 no --version).
+    try { const r = spawnSync(bin, ['--version'], { timeout: 3000 }); if (!r.error) { espeakBin = bin; break; } } catch { /* não instalado */ }
   }
   return espeakBin;
 }

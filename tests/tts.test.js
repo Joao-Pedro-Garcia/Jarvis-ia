@@ -26,7 +26,7 @@ const fake = net.createServer((sock) => {
       const head = buf.subarray(0, end).toString();
       buf = buf.subarray(end + 4);
       received.push({ head });
-      if (mode === 'deny' || (mode === 'clock' && connections === 1)) {
+      if (mode === 'deny' || (mode === 'clock' && connections === 1) || (mode === 'newver' && /Sec-MS-GEC-Version=1-143\./.test(head))) {
         sock.end(`HTTP/1.1 403 Forbidden\r\nDate: ${new Date(Date.now() + 3600e3).toUTCString()}\r\nContent-Length: 0\r\n\r\n`);
         return;
       }
@@ -111,6 +111,18 @@ test('403 por relógio do celular errado → acerta pela hora do servidor e tent
   const audio = await edge.synthesize('teste');
   assert.deepEqual(audio, AUDIO);
   assert.equal(connections, 2);
+});
+
+test('403 por versão do Edge não aceita → tenta outra versão e lembra a que funcionou', async () => {
+  mode = 'newver';
+  assert.deepEqual(await edge.synthesize('teste'), AUDIO);
+  const versions = received.filter((r) => r.head).map((r) => /Sec-MS-GEC-Version=1-([\d.]+)/.exec(r.head)[1]);
+  assert.equal(versions[0].split('.')[0], '143');
+  assert.notEqual(versions.at(-1).split('.')[0], '143');
+  received = [];
+  await edge.synthesize('de novo');
+  assert.equal(received.filter((r) => r.head).length, 1, 'na próxima já usa a versão que funcionou');
+  assert.match(received.find((r) => r.head).head, /Cookie: muid=[0-9A-F]{32};/);
 });
 
 test('servidor mudo → desiste no tempo limite (não trava a fala)', async () => {
