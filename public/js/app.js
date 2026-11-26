@@ -11,6 +11,7 @@ import { finishListening, holdWake, configureStt, listenOnce, stopListening, hea
 import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
+import { setClapStrict } from './modules/clap.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
 import { $, $$, esc, toast, relTime } from './ui/dom.js';
@@ -145,6 +146,7 @@ function sleepNow({ quiet = false } = {}) {
   document.body.classList.add('asleep');
   setState('standby', 'DORMINDO');
   if (!quiet) addMsg('system', '💤 Modo dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.', 'SISTEMA');
+  setClapStrict(true); // dormindo: só palmas nítidas acordam (barulhos de casa não)
   // Dormindo, a tela precisa ficar ligada (bem escura) para o microfone ouvir as palmas.
   setKeepAwake(true).catch(() => {});
   // os detectores de ativação precisam estar ligados para acordar
@@ -160,6 +162,7 @@ function wakeUp(how) {
   if (!asleep) return false;
   asleep = false;
   document.body.classList.remove('asleep');
+  setClapStrict(false);
   document.body.classList.add('waking'); setTimeout(() => document.body.classList.remove('waking'), 1200);
   core?.pulse(1);
   setState('standby');

@@ -342,7 +342,7 @@ registerCommand({
   aliases: ['Bíblia', 'Quero ler a Bíblia', 'Vamos continuar minha leitura', 'Continue de onde parei', 'Continuar Bíblia'],
   patterns: [
     /^(a |minha )?biblia( sagrada)?$/,
-    /\b(ler|leitura|abr\w+|continu\w+|retom\w+|bora|vamos)\b.{0,20}\bbiblia\b/, /\bbiblia\b.{0,15}\b(continu\w+|leitura|ler)\b/,
+    /\b(ler|leitura|abr\w+|continu\w+|retom\w+|bora|vamos|mostr\w+|traz\w*|pega|cade|quero|ve|ver)\b.{0,20}\bbiblia\b/, /\bbiblia\b.{0,15}\b(continu\w+|leitura|ler)\b/,
     /\b(continu\w+|retom\w+|segu\w+) (com )?(a |minha )?leitura\b/, /\bcontinu\w+ de onde (eu )?parei\b/, /\bleitura (de hoje|do dia|diaria)\b/,
     // "continue" sozinho, sem outro contexto aberto: retoma a leitura de onde parou.
     (t, s) => (/^(continue|continua|continuar|retome|retoma|retomar)$/.test(t) && !bibleActive(s) && s.context.activeModule !== 'news' ? [t] : null),

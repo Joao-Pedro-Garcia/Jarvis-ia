@@ -104,3 +104,24 @@ test('analyzeBlock: ruído branco tem alta frequência alta; senoide grave, baix
   assert.ok(analyzeBlock(white).hf > 0.6);
   assert.ok(analyzeBlock(low).hf < 0.01);
 });
+
+// ---------- Dormindo: detecção RIGOROSA (só palmas nítidas acordam) ----------
+const strict = { strict: true };
+test('rigoroso (dormindo): duas palmas fortes e nítidas acordam', () => {
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.7), clap(1150, 0.7)]), strict)), 1);
+});
+test('rigoroso: palmas fracas/distantes, que acordariam no modo normal, não acordam', () => {
+  const sounds = [clap(800, 0.19), clap(1100, 0.19)];
+  assert.equal(doubles(run(timeline(2500, sounds))), 1, 'modo normal aceita');
+  assert.equal(doubles(run(timeline(2500, sounds), strict)), 0, 'dormindo recusa');
+});
+test('rigoroso: batidas de porta/mesa e fala não acordam', () => {
+  assert.equal(doubles(run(timeline(3000, [{ kind: 'thud', at: 600, amp: 0.8, dur: 90 }, { kind: 'thud', at: 900, amp: 0.8, dur: 90 }]), strict)), 0);
+  assert.equal(doubles(run(timeline(3000, [{ kind: 'speech', at: 500, amp: 0.5, dur: 900 }, clap(1500, 0.7)]), strict)), 0);
+});
+test('rigoroso: estalos com intensidades bem diferentes não acordam', () => {
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.9), clap(1100, 0.35)])), { ...strict }), 0);
+});
+test('rigoroso: ambiente barulhento (TV/música alta) não acorda com estalos no meio', () => {
+  assert.equal(doubles(run(timeline(3000, [clap(1200, 0.7), clap(1500, 0.7)], { noise: 0.06 }), strict)), 0);
+});

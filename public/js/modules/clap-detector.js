@@ -22,7 +22,11 @@ export const DEFAULTS = {
   hfMin: 0.18,
   thresholdOverride: 0,
   attackRatio: 3.2,
+  // Modo RIGOROSO (JARVIS dormindo): só acorda com duas palmas fortes e nítidas em
+  // ambiente calmo — barulhos de casa, fala, TV, portas e batidas não acordam.
+  strict: false,
 };
+const STRICT = { thr: 1.8, attackRatio: 5, hfMin: 0.3, maxClapMs: 80, similar: 2.2, minGapMs: 150, maxGapMs: 650, quietBefore: 3 };
 
 export class ClapDetector {
   constructor(opts = {}) {
@@ -34,6 +38,7 @@ export class ClapDetector {
     this.pendingAt = null;
     this.lastFire = -Infinity;
     this.cur = null;
+    this.ambient = 0.004; // energia média dos últimos ~300 ms (para exigir calma antes da 1ª palma)
   }
 
   configure(opts = {}) {
@@ -44,7 +49,7 @@ export class ClapDetector {
     this.absMin = this.o.thresholdOverride > 0 ? this.o.thresholdOverride : 0.22 - s * 0.17;
   }
 
-  threshold() { return Math.max(this.absMin, this.floor * this.ratio * 2.2); }
+  threshold() { return Math.max(this.absMin, this.floor * this.ratio * 2.2) * (this.o.strict ? STRICT.thr : 1); }
 
   /** Processa um quadro. Retorna eventos: {type:'clap'|'double'|'reject', ...} */
   process({ rms, peak, hf = 0.5, t }) {
@@ -59,9 +64,12 @@ export class ClapDetector {
       events.push({ type: 'double', t });
     }
 
+    const strict = !!this.o.strict;
     if (this.state === 'idle') {
-      const attack = rms > Math.max(this.prevRms, this.floor) * this.o.attackRatio;
-      if (peak >= thr && attack && t - this.lastFire >= this.o.cooldownMs) {
+      const attack = rms > Math.max(this.prevRms, this.floor) * (strict ? STRICT.attackRatio : this.o.attackRatio);
+      // Rigoroso: a 1ª palma precisa vir depois de um momento calmo (barulho contínuo não vale).
+      const calm = !strict || this.claps.length > 0 || this.ambient < this.floor * STRICT.quietBefore;
+      if (peak >= thr && attack && calm && t - this.lastFire >= this.o.cooldownMs) {
         this.state = 'clap';
         this.cur = { start: t, peak, peakRms: rms, hfSum: hf, n: 1 };
       } else if (rms < this.floor * 4) {
@@ -75,9 +83,9 @@ export class ClapDetector {
       if (rms < c.peakRms * 0.22 || rms < this.floor * 2.5) {
         this.state = 'idle';
         const hfAvg = c.hfSum / c.n;
-        if (hfAvg < this.o.hfMin) events.push({ type: 'reject', reason: 'pouca alta frequência (voz/batida grave)', t });
+        if (hfAvg < (strict ? STRICT.hfMin : this.o.hfMin)) events.push({ type: 'reject', reason: 'pouca alta frequência (voz/batida grave)', t });
         else events.push(...this.#onClap({ t: c.start, peak: c.peak, dur }));
-      } else if (dur > this.o.maxClapMs) {
+      } else if (dur > (strict ? STRICT.maxClapMs : this.o.maxClapMs)) {
         this.state = 'sustained';
         this.claps = []; this.pendingAt = null;
         events.push({ type: 'reject', reason: 'som sustentado (fala/música)', t });
@@ -86,6 +94,7 @@ export class ClapDetector {
       if (rms < this.floor * 3 || peak < thr * 0.35) this.state = 'idle';
     }
     this.prevRms = rms;
+    this.ambient = this.ambient * 0.985 + rms * 0.015;
     return events;
   }
 
@@ -103,9 +112,10 @@ export class ClapDetector {
     const prev = this.claps[this.claps.length - 1];
     if (prev) {
       const gap = clap.t - prev.t;
-      if (gap < this.o.minGapMs) return ev; // eco/reverberação da mesma palma
-      const similar = Math.max(prev.peak, clap.peak) / Math.min(prev.peak, clap.peak) < 3.5;
-      if (gap <= this.o.maxGapMs && similar) {
+      const strict = !!this.o.strict;
+      if (gap < (strict ? STRICT.minGapMs : this.o.minGapMs)) return ev; // eco/reverberação da mesma palma
+      const similar = Math.max(prev.peak, clap.peak) / Math.min(prev.peak, clap.peak) < (strict ? STRICT.similar : 3.5);
+      if (gap <= (strict ? STRICT.maxGapMs : this.o.maxGapMs) && similar) {
         this.claps.push(clap);
         this.pendingAt = clap.t;
         return ev;

@@ -97,6 +97,8 @@ export async function stopClap(keepEnabled = false) {
 }
 
 export function configureClap(settings) { detector.configure(settings || {}); }
+/** Dormindo: detecção rigorosa (só palmas nítidas acordam). */
+export function setClapStrict(on) { detector.configure({ strict: !!on }); clientLog('palmas', on ? 'Detecção rigorosa (dormindo)' : 'Detecção normal'); }
 
 /**
  * TESTE REAL das palmas (diagnóstico): liga o detector se preciso, espera até
