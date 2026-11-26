@@ -45,24 +45,39 @@ test('fonte rápida continua respondendo normalmente dentro do prazo', async () 
   assert.equal(ex.rates[0].value, 5.5);
 });
 
-test('IA local (Ollama): instruções curtas, histórico curto, resposta limitada e modelo mantido na memória', async () => {
-  let body; let warmed = false;
+test('IA local (Ollama): instruções fixas, histórico que só cresce (reaproveita leitura), resposta limitada, modelo na memória', async () => {
+  const bodies = []; let warmed = false;
+  process.env.JARVIS_AI_THREADS = '4';
   mock = mockFetch([
     ['127.0.0.1:11434/api/tags', () => jsonResponse({ models: [{ name: 'qwen2.5:0.5b' }] })],
     ['127.0.0.1:11434/api/generate', () => { warmed = true; return jsonResponse({ done: true }); }],
-    ['127.0.0.1:11434/api/chat', (u, o) => { body = JSON.parse(o.body); return jsonResponse({ message: { content: 'Resposta curta.' } }); }],
+    ['127.0.0.1:11434/api/chat', (u, o) => { bodies.push(JSON.parse(o.body)); return jsonResponse({ message: { content: `Resposta ${bodies.length}.` } }); }],
   ]);
   await llm.refresh({ force: true });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(warmed, true, 'modelo pré-carregado ao detectar');
   const sess = { sessionId: 'speed-ia' };
-  for (const q of ['qual a capital da Mongólia?', 'e a do Japão?', 'e a da França?', 'me conte uma curiosidade']) await processInput(q, sess);
-  assert.equal(body.keep_alive, local.KEEP_ALIVE);
-  assert.ok(body.options.num_predict <= 220);
-  assert.equal(body.options.num_ctx, local.NUM_CTX);
-  assert.ok(body.messages[0].content.length < 900, `instruções com ${body.messages[0].content.length} caracteres`);
-  assert.ok(body.messages.length <= 6, `${body.messages.length} mensagens enviadas`);
-  assert.equal(body.messages.at(-1).content, 'me conte uma curiosidade');
+  const qs = ['qual a capital da Mongólia?', 'e a do Japão?', 'e a da França?', 'me conte uma curiosidade', 'e outra?', 'qual o maior planeta?'];
+  for (const q of qs) await processInput(q, sess);
+  delete process.env.JARVIS_AI_THREADS;
+  assert.equal(bodies.length, qs.length);
+  const b = bodies.at(-1);
+  assert.equal(b.keep_alive, local.KEEP_ALIVE);
+  assert.ok(b.options.num_predict <= 200);
+  assert.equal(b.options.num_ctx, local.NUM_CTX);
+  assert.equal(b.options.num_thread, 4);
+  assert.ok(b.messages[0].content.length < 700, `instruções com ${b.messages[0].content.length} caracteres`);
+  // Instruções idênticas em todas as perguntas (sem hora/tom) → leitura reaproveitada.
+  assert.ok(bodies.every((x) => x.messages[0].content === bodies[0].messages[0].content), 'instruções mudaram entre perguntas');
+  // Cada pedido começa exatamente como o anterior (histórico só cresce dentro da janela).
+  let reused = 0;
+  for (let i = 1; i < bodies.length; i++) {
+    const prev = bodies[i - 1].messages; const cur = bodies[i].messages;
+    if (cur.length > prev.length) { assert.deepEqual(cur.slice(0, prev.length), prev, `pedido ${i + 1} não reaproveita o anterior`); reused++; }
+  }
+  assert.ok(reused >= 3, `só ${reused} pedidos reaproveitaram o anterior (tamanhos: ${bodies.map((x) => x.messages.length).join(', ')})`);
+  assert.ok(bodies.every((x) => x.messages.length <= 10), 'histórico limitado');
+  assert.equal(b.messages.at(-1).content, 'qual o maior planeta?');
 });
 
 test('cumprimentos e agradecimentos respondem na hora, sem chamar a IA (mesmo com IA ligada)', async () => {

@@ -37,17 +37,40 @@ function history(sess) {
   return msgs;
 }
 
-/** Instruções curtas para IA local (celular/PC comum): menos texto para ler = resposta rápida. */
-function compactPrompt(p, tone, domain) {
+/**
+ * Instruções para IA local (celular/PC comum): curtas e SEMPRE IGUAIS (sem hora, sem
+ * tom do momento). Assim o Ollama reaproveita a leitura já feita e só lê a mensagem
+ * nova — no celular, ler o texto é a parte mais lenta (≈6 tokens/s num Poco M7 Pro).
+ */
+function compactPrompt(p) {
   const mem = memory.contextSnippet();
   return [
-    `Você é ${p.nome}, assistente pessoal${p.nome_usuario ? ` de ${p.nome_usuario}` : ''}. Responda sempre em português do Brasil, em no máximo 3 frases curtas e naturais (a resposta é falada em voz alta).`,
-    `Tom agora: ${tone.mode}. Assunto sério: seja sério e objetivo. Desabafo: acolha com carinho e faça uma pergunta. Brincadeira: seja leve.`,
-    domain ? `Assunto técnico (${domain}): seja preciso e use unidades.` : '',
+    `Você é ${p.nome}, assistente pessoal${p.nome_usuario ? ` de ${p.nome_usuario}` : ''}. Responda em português do Brasil, em 1 a 3 frases curtas e naturais (a resposta é falada).`,
+    'Assunto sério: sério e objetivo. Desabafo: acolha e pergunte com carinho. Brincadeira: leve. Técnico: preciso, com unidades.',
     'Nunca invente notícias, preços, cotações ou fatos. Se não souber, diga que não sabe.',
-    `Agora: ${formatDateLong()}, ${formatTimeSpoken().text}.`,
-    mem ? `O que você sabe do usuário: ${mem.slice(0, 300)}` : '',
+    mem ? `Sobre o usuário: ${mem.slice(0, 300)}` : '',
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * Histórico para IA local: em vez de uma janela que "desliza" (o que obriga a reler
+ * tudo a cada pergunta), cresce até LOCAL_WINDOW mensagens e então recomeça. Enquanto
+ * cresce, o começo é idêntico ao da pergunta anterior e o Ollama reaproveita a leitura.
+ */
+const LOCAL_WINDOW = 8;
+function localHistory(sess) {
+  const since = sess.context.aiWinAt || 0;
+  const msgs = [];
+  for (const h of sess.history.slice(0, -1).filter((x) => (x.at || 0) >= since)) {
+    const role = h.role === 'user' ? 'user' : 'assistant';
+    const content = String(h.content).slice(0, 400);
+    if (msgs.length && msgs[msgs.length - 1].role === role) msgs[msgs.length - 1].content += `\n${content}`;
+    else msgs.push({ role, content });
+  }
+  while (msgs.length && msgs[0].role !== 'user') msgs.shift();
+  if (msgs.length && msgs[msgs.length - 1].role === 'user') msgs.pop();
+  if (msgs.length >= LOCAL_WINDOW) { sess.context.aiWinAt = Date.now(); return []; }
+  return msgs;
 }
 
 async function converse(text, ctx, tone) {
@@ -65,7 +88,7 @@ async function converse(text, ctx, tone) {
   const p = getPersonality();
   const isLocal = llm.kind() === 'local';
   const bibleCtx = sess.context.activeModule === 'bible' ? `O leitor da Bíblia está aberto. ${reading.whereAmI(ctx.pageSize)}` : '';
-  const system = isLocal ? compactPrompt(p, tone, domain) : systemPrompt(p, {
+  const system = isLocal ? compactPrompt(p) : systemPrompt(p, {
     tone, domain,
     memory: memory.contextSnippet(),
     context: [bibleCtx, sess.context.activeModule === 'news' ? 'O painel de notícias está aberto.' : ''].filter(Boolean).join(' '),
@@ -75,9 +98,9 @@ async function converse(text, ctx, tone) {
   try {
     const { text: answer } = await llm.complete({
       system,
-      // IA local: só as últimas mensagens (curtas) e resposta limitada → 2 a 3 segundos em vez de 10+.
-      messages: isLocal ? [...history(sess).slice(-4).map((m) => ({ ...m, content: m.content.slice(0, 400) })), { role: 'user', content: text }] : [...history(sess), { role: 'user', content: text }],
-      maxTokens: isLocal ? (tone.mode === 'estudo' || domain ? 220 : 140) : tone.mode === 'estudo' || domain ? 2500 : 1200,
+      // IA local: instruções fixas + histórico que só cresce → o Ollama lê só a mensagem nova.
+      messages: isLocal ? [...localHistory(sess), { role: 'user', content: text }] : [...history(sess), { role: 'user', content: text }],
+      maxTokens: isLocal ? (tone.mode === 'estudo' || domain ? 200 : 110) : tone.mode === 'estudo' || domain ? 2500 : 1200,
       effort: domain || tone.mode === 'estudo' ? 'medium' : undefined,
       webSearch: needsWeb && getSettings().privacy.allowWebSearch,
     });

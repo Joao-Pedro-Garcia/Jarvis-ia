@@ -75,6 +75,8 @@ export const localInfo = () => ({ detected, lastProbe });
 // cada pergunta), limita o contexto e o tamanho da resposta → respostas rápidas.
 export const KEEP_ALIVE = '60m';
 export const NUM_CTX = 2048;
+/** Núcleos do processador para a IA (JARVIS_AI_THREADS). No celular, usar só os núcleos rápidos costuma ser mais veloz. */
+export const threads = () => { const n = Number(process.env.JARVIS_AI_THREADS); return Number.isInteger(n) && n > 0 && n <= 32 ? n : null; };
 async function postJson(url, body, timeoutMs) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -94,7 +96,7 @@ async function ollamaChat({ system, messages, maxTokens, json, timeoutMs }) {
     messages: [{ role: 'system', content: system }, ...messages],
     stream: false,
     keep_alive: KEEP_ALIVE,
-    options: { num_predict: maxTokens, num_ctx: NUM_CTX },
+    options: { num_predict: maxTokens, num_ctx: NUM_CTX, ...(threads() ? { num_thread: threads() } : {}) },
     ...(json ? { format: json } : {}),
   }, timeoutMs);
   const text = data?.message?.content;
