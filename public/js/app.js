@@ -737,6 +737,7 @@ async function boot() {
     if (evt.type === 'AI_BENCHMARK_START' && evt.payload?.auto) addMsg('system', '⚙ Ajustando a velocidade da IA ao seu aparelho (só na primeira vez, cerca de 1 minuto). Enquanto isso, as respostas da IA podem demorar.');
     if (evt.type === 'AI_BENCHMARK_DONE' && evt.payload?.text) { addMsg('jarvis', evt.payload.text, { tag: 'SISTEMA' }); if (evt.payload.speech) say(evt.payload.speech); }
     if (evt.type === 'MEMORY_UPDATED') refreshMemoryMini();
+    if (evt.type === 'MEMORY_LEARNED' && evt.payload?.items?.length) { addMsg('system', `🧠 Anotei: ${evt.payload.items.join(' · ')}`); refreshMemoryMini(); }
     if (['MEMORY_UPDATED', 'BIBLE_DAY_COMPLETED', 'NEWS_FETCHED', 'HOUSE_ACTION', 'LLM_ERROR'].includes(evt.type)) refreshStatus();
   });
   // Um toque inicial é exigido pelos navegadores para liberar áudio e microfone.

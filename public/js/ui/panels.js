@@ -21,7 +21,7 @@ function memItem(m, kind) {
   const status = task ? (m.status || (m.done ? 'done' : 'pending')) : null;
   return `<li data-id="${m.id}" class="${status === 'done' ? 'done' : ''} ${status === 'cancelled' ? 'cancelled' : ''}">
     ${task ? `<input type="checkbox" ${status === 'done' ? 'checked' : ''} aria-label="Concluída" ${status === 'cancelled' ? 'disabled' : ''}>` : ''}
-    <span class="t">${esc(m.text)}${task ? dueLabel(m) : ''}${status === 'cancelled' ? ' <span class="badge">CANCELADA</span>' : ''}</span>
+    <span class="t">${esc(m.text)}${m.source === 'auto' ? ' <span class="badge" title="Aprendido sozinho na conversa">APRENDIDO</span>' : ''}${task ? dueLabel(m) : ''}${status === 'cancelled' ? ' <span class="badge">CANCELADA</span>' : ''}</span>
     ${m.protected ? '<button class="btn small" data-reveal>Mostrar</button>' : '<button class="btn small" data-edit>Editar</button>'}
     ${task && status === 'pending' ? '<button class="btn small" data-postpone title="Adiar para amanhã 9h">Adiar</button><button class="btn small" data-cancel>Cancelar</button>' : ''}
     <button class="btn small" data-del>Apagar</button>
@@ -181,7 +181,9 @@ export async function showSettings({ onChange } = {}) {
         <button class="btn small" id="p-save" type="button">Salvar personalidade</button>
       </fieldset>
       <fieldset class="fieldset"><legend>PRIVACIDADE E SEGURANÇA</legend>
-        <label class="switch">Permitir pesquisa na web pela IA <input type="checkbox" data-k="privacy.allowWebSearch" ${s.privacy.allowWebSearch ? 'checked' : ''}></label>
+        <label class="switch">Aprender sozinho com as conversas (memória automática) <input type="checkbox" data-k="privacy.autoMemory" ${s.privacy.autoMemory !== false ? 'checked' : ''}></label>
+        <p class="hint">Com o Groq conectado, o JARVIS anota fatos que você conta sobre você (nome, trabalho, família, gostos, datas) e avisa com “🧠 Anotei”. Nunca guarda senhas, documentos, cartões, endereço ou telefone. Tudo aparece em Memória e pode ser apagado.</p>
+        <label class="switch">Permitir pesquisa na internet pela IA <input type="checkbox" data-k="privacy.allowWebSearch" ${s.privacy.allowWebSearch ? 'checked' : ''}></label>
         <label class="switch">Modo seguro (confirma tudo, bloqueia a casa) <input type="checkbox" data-k="security.safeMode" ${s.security.safeMode ? 'checked' : ''}></label>
         <p class="hint">Chaves de API ficam apenas no servidor (.env). Os logs não guardam o conteúdo completo das conversas.</p>
       </fieldset>

@@ -11,6 +11,7 @@ import { ENGINE_DISCLAIMER } from '../modules/engine/engine.js';
 import { detectTone, detectDomain, emergencyText } from './tone.js';
 import { getPersonality, systemPrompt } from './personality.js';
 import * as llm from './llm.js';
+import * as autoMemory from './auto-memory.js';
 import { localReply, getMode, clearMode, socialReply } from './local-mind.js';
 import * as tasks from '../modules/tasks/tasks.js';
 import { normalizeInput, resolveIntent, dispatch, handlePending, moduleResult, speechFrom, speechLimit, getRecentCommands } from './orchestrator.js';
@@ -165,6 +166,8 @@ export async function processInput(raw, { sessionId = 'default', pageSize = 8, s
   }
   const tone = detectTone(text, { isCommand: !!result });
   if (!result) result = await converse(text, ctx, tone);
+  // Memória automática: em segundo plano, só em conversa (não em comandos), sem atrasar a resposta.
+  if (String(result.intent || '').startsWith('conversation')) setTimeout(() => autoMemory.learnFrom(text).catch(() => {}), 0);
 
   result.tone = result.tone || tone.mode;
   result.mode = result.mode || modeOf(result, tone);

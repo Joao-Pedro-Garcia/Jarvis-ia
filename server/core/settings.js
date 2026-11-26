@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS = {
   clap: { enabled: false, sensitivity: 0.6, minGapMs: 120, maxGapMs: 700, maxClapMs: 110, cooldownMs: 2500, thresholdOverride: 0 },
   ui: { theme: 'ciano', animations: true, mode: 'desempenho', particles: true, keepAwake: false, startAsleep: true },
   notifications: { enabled: false },
-  privacy: { saveConversationLogs: false, allowWebSearch: true },
+  privacy: { saveConversationLogs: false, allowWebSearch: true, autoMemory: true },
   security: { safeMode: false },
   bible: { pageSizeOverride: 0 },
   ai: { threads: 0, tunedFor: '' }, // núcleos para a IA local (0 = automático) e o modelo para o qual foi medido
