@@ -141,6 +141,51 @@ export async function benchmark(list = [2, 4, 6, 8]) {
   return { results: results.sort((a, b) => a.threads - b.threads), best };
 }
 
+/**
+ * Resposta em pedaços (palavra por palavra): chama onToken(trecho) assim que a IA
+ * escreve. Prazo por INATIVIDADE (90 s sem nada chegar), não pelo total: uma resposta
+ * lenta mas ativa não é cortada.
+ */
+async function ollamaChatStream({ system, messages, maxTokens, onToken, idleMs = 90000 }) {
+  const ctrl = new AbortController();
+  let timer = setTimeout(() => ctrl.abort(), idleMs);
+  const touch = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(), idleMs); };
+  let text = '';
+  try {
+    const res = await fetch(`${detected.base}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+      body: JSON.stringify({
+        model: detected.model, messages: [{ role: 'system', content: system }, ...messages], stream: true, keep_alive: KEEP_ALIVE,
+        options: { num_predict: maxTokens, num_ctx: NUM_CTX, ...(threads() ? { num_thread: threads() } : {}) },
+      }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => null); throw Object.assign(new Error(d?.error || `HTTP ${res.status}`), { status: res.status }); }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      touch();
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let evt; try { evt = JSON.parse(line); } catch { continue; }
+        if (evt.error) throw new Error(evt.error);
+        const delta = evt.message?.content || '';
+        if (delta) { text += delta; try { onToken(delta); } catch { /* tela desconectada: segue */ } }
+      }
+    }
+    if (!text.trim()) throw new Error('a IA local não respondeu nada');
+    return { text: text.trim() };
+  } catch (err) {
+    if (err.name === 'AbortError') throw Object.assign(new Error('tempo de resposta esgotado'), { status: 0 });
+    throw err;
+  } finally { clearTimeout(timer); }
+}
+
 /** Carrega o modelo na memória logo ao iniciar (a primeira pergunta não espera). */
 export async function warmUp() {
   if (!detected || detected.kind !== 'ollama' || detected.warmed) return false;
@@ -159,11 +204,11 @@ export const localProvider = {
   configured: () => !!detected,
   model: () => detected?.model ?? null,
   displayName: () => (detected ? `IA local (${detected.name})` : 'IA local'),
-  async complete({ system, messages, maxTokens, json, timeoutMs }) {
+  async complete({ system, messages, maxTokens, json, timeoutMs, onToken }) {
     if (!detected) throw new Error('nenhuma IA local detectada');
     // Modelos locais em CPU podem ser lentos: prazo maior.
     const t = Math.max(timeoutMs, 120000);
-    if (detected.kind === 'ollama') return ollamaChat({ system, messages, maxTokens, json, timeoutMs: t });
+    if (detected.kind === 'ollama') return onToken && !json ? ollamaChatStream({ system, messages, maxTokens, onToken }) : ollamaChat({ system, messages, maxTokens, json, timeoutMs: t });
     return chatCompletion({ endpoint: `${detected.base}/v1/chat/completions`, model: detected.model, system, messages, maxTokens, json, timeoutMs: t });
   },
   friendlyError(err) {

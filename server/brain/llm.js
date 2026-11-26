@@ -88,11 +88,12 @@ export async function refresh({ force = false } = {}) {
 }
 
 /** Chamada genérica. Retorna { text } ou lança erro com mensagem amigável. */
-export async function complete({ system, messages, maxTokens = 1500, effort, webSearch = false, json = null, timeoutMs = 45000 }) {
+export async function complete({ system, messages, maxTokens = 1500, effort, webSearch = false, json = null, timeoutMs = 45000, onToken = null }) {
   const p = provider();
   if (!p || !p.configured()) throw Object.assign(new Error('nenhuma IA disponível (instale uma IA local gratuita, como o Ollama, ou configure AI_PROVIDER no .env)'), { code: 'NO_KEY' });
   try {
-    const out = await p.complete({ system, messages, maxTokens, effort, json, timeoutMs, webSearch: webSearch && p.capabilities.webSearch && process.env.JARVIS_WEB_SEARCH !== '0' });
+    // onToken: provedores que sabem escrever em pedaços (IA local) mandam a resposta aos poucos; os outros ignoram.
+    const out = await p.complete({ system, messages, maxTokens, effort, json, timeoutMs, onToken, webSearch: webSearch && p.capabilities.webSearch && process.env.JARVIS_WEB_SEARCH !== '0' });
     lastOkAt = new Date().toISOString();
     lastError = null;
     return out;

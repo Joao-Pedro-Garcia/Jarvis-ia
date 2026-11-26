@@ -103,6 +103,7 @@ async function converse(text, ctx, tone) {
       maxTokens: isLocal ? (tone.mode === 'estudo' || domain ? 200 : 110) : tone.mode === 'estudo' || domain ? 2500 : 1200,
       effort: domain || tone.mode === 'estudo' ? 'medium' : undefined,
       webSearch: needsWeb && getSettings().privacy.allowWebSearch,
+      onToken: ctx.onToken,
     });
     let out = answer || 'Hmm, fiquei sem resposta agora. Pode repetir?';
     if (emergency && !/19[0-3]/.test(out)) out = `${emergency}\n\n${out}`;
@@ -142,7 +143,7 @@ export function modeOf(result, tone) {
  * @param {string} raw
  * @param {{sessionId?:string, pageSize?:number, source?:'voice'|'text', client?:object}} opts
  */
-export async function processInput(raw, { sessionId = 'default', pageSize = 8, source = 'text', client = {} } = {}) {
+export async function processInput(raw, { sessionId = 'default', pageSize = 8, source = 'text', client = {}, onToken = null } = {}) {
   const started = Date.now();
   const sess = memory.session(sessionId);
   const settings = getSettings();
@@ -153,7 +154,7 @@ export async function processInput(raw, { sessionId = 'default', pageSize = 8, s
   memory.pushHistory(sess, 'user', text);
   sess.lastRaw = text;
   const norm = normalizeInput(text, getPersonality().nome);
-  const ctx = { sess, pageSize, settings, source, client, confirmed: false };
+  const ctx = { sess, pageSize, settings, source, client, confirmed: false, onToken };
 
   let result = await handlePending(norm, ctx);
   if (!result) {

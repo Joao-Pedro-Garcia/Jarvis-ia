@@ -112,6 +112,19 @@ function serveStatic(req, res, url) {
 }
 
 // ---- SSE: eventos do servidor em tempo real para a interface ----
+/** Processa uma mensagem do usuário dentro da sua conversa (memória da conversa + registro). */
+async function runInput(body, onToken = null) {
+  const client = body.client && typeof body.client === 'object' ? { mic: String(body.client.mic || '').slice(0, 20), hearing: body.client.hearing !== false, voice: body.client.voice !== false, notifications: String(body.client.notifications || '').slice(0, 20) } : {};
+  // Cada conversa tem a sua memória de sessão (a IA lembra o que foi dito nela).
+  const chatId = chats.validId(body.chatId) ? body.chatId : chats.newId();
+  const sessionKey = `chat-${chatId}`;
+  const sess = memory.session(sessionKey);
+  if (!sess.history.length) for (const h of chats.historyFor(chatId)) memory.pushHistory(sess, h.role, h.content);
+  const out = await processInput(body.text, { sessionId: sessionKey, pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client, onToken });
+  const chat = chats.append(chatId, String(body.text || '').trim(), out);
+  return { ...out, chatId, chatTitle: chat?.title || null };
+}
+
 const sseClients = new Set();
 bus.on('*', (evt) => {
   const data = `data: ${JSON.stringify(evt)}\n\n`;
@@ -140,16 +153,24 @@ async function api(req, res, url) {
     }
     case 'POST /api/input': {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
+      return send(res, 200, await runInput(await readBody(req)));
+    }
+    case 'POST /api/input/stream': {
+      // Mesma coisa que /api/input, mas a resposta da IA chega aos pedaços (uma linha JSON por evento):
+      // {"type":"token","text":"..."} … e no final {"type":"done","result":{…}}.
+      if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       const body = await readBody(req);
-      const client = body.client && typeof body.client === 'object' ? { mic: String(body.client.mic || '').slice(0, 20), hearing: body.client.hearing !== false, voice: body.client.voice !== false, notifications: String(body.client.notifications || '').slice(0, 20) } : {};
-      // Cada conversa tem a sua memória de sessão (a IA lembra o que foi dito nela).
-      const chatId = chats.validId(body.chatId) ? body.chatId : chats.newId();
-      const sessionKey = `chat-${chatId}`;
-      const sess = memory.session(sessionKey);
-      if (!sess.history.length) for (const h of chats.historyFor(chatId)) memory.pushHistory(sess, h.role, h.content);
-      const out = await processInput(body.text, { sessionId: sessionKey, pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client });
-      const chat = chats.append(chatId, String(body.text || '').trim(), out);
-      return send(res, 200, { ...out, chatId, chatTitle: chat?.title || null });
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      const line = (o) => { if (!res.writableEnded) res.write(`${JSON.stringify(o)}\n`); };
+      try {
+        const result = await runInput(body, (delta) => line({ type: 'token', text: delta }));
+        line({ type: 'done', result });
+      } catch (err) {
+        log.error('servidor', `Falha no processamento: ${err.message}`);
+        line({ type: 'error', error: 'Erro interno ao processar o pedido.' });
+      }
+      res.end();
+      return undefined;
     }
     case 'GET /api/chats': return send(res, 200, { chats: chats.list({ category: url.searchParams.get('category') || null, q: url.searchParams.get('q') || '' }), categories: chats.categoriesInUse() });
     case 'GET /api/events': {

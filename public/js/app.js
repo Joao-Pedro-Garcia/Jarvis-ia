@@ -140,13 +140,27 @@ async function handleInput(text, source = 'text') {
   setState('thinking');
   const t0 = performance.now();
   let res;
+  // Balão da resposta sendo escrita (IA local manda a resposta palavra por palavra).
+  let live = null;
+  const onToken = (delta) => {
+    if (!live) {
+      live = document.createElement('p'); live.className = 'msg live'; live.setAttribute('aria-busy', 'true');
+      $('#transcript').appendChild(live);
+      setState('thinking', 'ESCREVENDO');
+    }
+    live.textContent += delta;
+    $('#transcript').scrollTop = $('#transcript').scrollHeight;
+  };
   try {
-    res = await api.post('/api/input', { text, sessionId, chatId, pageSize: pageSize(), source, client: clientInfo() }, { timeout: 90000 });
+    const payload = { text, sessionId, chatId, pageSize: pageSize(), source, client: clientInfo() };
+    try { res = await api.postStream('/api/input/stream', payload, onToken); }
+    catch (err) { if (err.status === 404 || err.status === 405) res = await api.post('/api/input', payload, { timeout: 90000 }); else throw err; }
     if (res?.chatId && res.chatId !== chatId) setChat(res.chatId);
     if (!$('#drawer').hidden) renderChats();
     if (!serverReachable) { serverReachable = true; updateBanner(); }
   } catch (err) {
     busy = false;
+    live?.remove();
     clientLog('erro-cliente', `Falha ao enviar comando: ${err.message}`, 'warn');
     if (err.offline || err.timeout) { serverReachable = !err.offline; updateBanner(); return offlineFallback(text, err); }
     setState('error', 'FALHA'); sounds.error();
@@ -166,6 +180,7 @@ async function handleInput(text, source = 'text') {
   }
   bus.emit(EVENTS.RESPONSE_RECEIVED, res);
   if (res.intent) { bus.emit(EVENTS.COMMAND_DETECTED, res); recentCommand(res.intent, res.module, res.success !== false || /^conversation/.test(res.intent)); }
+  live?.remove(); // a versão final (com etiqueta e botões) substitui o balão parcial
   addMsg('jarvis', res.text, { tag: res.module, confirm: res.awaitingConfirmation });
   document.body.classList.toggle('silent', !!res.silent);
   if (res.intent?.startsWith('system.silent')) { await refreshSettings(); }
