@@ -9,6 +9,7 @@ export function setupTestEnv(name) {
   process.env.JARVIS_DATA_DIR = dir;
   process.env.JARVIS_LOG_CONSOLE = '0';
   process.env.JARVIS_TIMEZONE = 'America/Araguaina';
+  process.env.JARVIS_AUTOTUNE = '0'; // o ajuste automático de núcleos é testado à parte
   for (const k of ['ANTHROPIC_API_KEY', 'AI_PROVIDER', 'AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'JARVIS_ACCESS_TOKEN', 'JARVIS_SECRET_KEY']) delete process.env[k];
   return dir;
 }

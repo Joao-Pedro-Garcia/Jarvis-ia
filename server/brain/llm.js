@@ -8,12 +8,49 @@
 // Chaves ficam SOMENTE no servidor e nunca são enviadas ao navegador.
 import { log } from '../core/logger.js';
 import { bus, EVENTS } from '../core/events.js';
+import { getSettings, updateSettings } from '../core/settings.js';
 import { anthropicProvider } from './ai/anthropic.js';
 import { openAICompatibleProvider } from './ai/openai-compatible.js';
 import { localProvider, detectLocal, localInfo, warmUp, benchmark as localBenchmark } from './ai/local.js';
 
 /** Teste de velocidade da IA local (Ollama). */
 export const benchmark = (list) => localBenchmark(list);
+
+let benchmarking = false;
+export const benchmarkRunning = () => benchmarking;
+/**
+ * Mede a IA local com 2, 4 e 8 núcleos EM SEGUNDO PLANO, salva o mais rápido
+ * (ai.threads + o modelo medido) e avisa a tela (AI_BENCHMARK_START / _DONE).
+ * Devolve false se já houver um teste rodando.
+ */
+export function runBenchmark({ auto = false } = {}) {
+  if (benchmarking) return false;
+  benchmarking = true;
+  const model = localInfo().detected?.model || '';
+  bus.emitEvent(EVENTS.AI_BENCHMARK_START, { auto, model });
+  localBenchmark([2, 4, 8]).then((r) => {
+    if (!r.best) return { auto, text: `O teste de velocidade falhou em todas as configurações: ${r.results.map((x) => `${x.threads} núcleos: ${x.error}`).join('; ')}.` };
+    updateSettings({ ai: { threads: r.best.threads, tunedFor: model } });
+    log.info('cerebro', `Velocidade da IA ajustada: ${r.best.threads} núcleos (≈ ${r.best.estSeconds} s por resposta)`);
+    const lines = r.results.map((x) => (x.error ? `${x.threads} núcleos: falhou (${x.error})` : `${x.threads} núcleos: leitura ${x.promptRate} tokens/s · escrita ${x.evalRate} tokens/s · resposta típica ≈ ${x.estSeconds} s`));
+    return {
+      auto, best: r.best, results: r.results,
+      text: `Teste de velocidade da IA (${model}):\n${lines.join('\n')}\n\nMelhor: ${r.best.threads} núcleos (≈ ${r.best.estSeconds} s por resposta típica). Já salvei essa configuração.`,
+      speech: `${auto ? 'Ajustei a velocidade da IA ao seu aparelho.' : 'Pronto.'} A IA fica mais rápida com ${r.best.threads} núcleos, cerca de ${Math.round(r.best.estSeconds)} segundos por resposta.`,
+    };
+  }).catch((err) => ({ auto, text: `Não consegui fazer o teste de velocidade: ${err.message}.` }))
+    .then((payload) => { benchmarking = false; bus.emitEvent(EVENTS.AI_BENCHMARK_DONE, payload); });
+  return true;
+}
+
+/** Primeira vez com este modelo (e sem núcleos definidos à mão): ajusta sozinho. */
+function autoTune(d) {
+  if (process.env.JARVIS_AUTOTUNE === '0' || process.env.JARVIS_AI_THREADS) return;
+  const ai = getSettings().ai || {};
+  if (ai.threads && ai.tunedFor === d.model) return;
+  log.info('cerebro', `Primeiro uso do modelo ${d.model}: ajustando a velocidade da IA em segundo plano`);
+  runBenchmark({ auto: true });
+}
 
 const CLOUD = { anthropic: anthropicProvider, openai: openAICompatibleProvider, 'openai-compatible': openAICompatibleProvider };
 let lastError = null;
@@ -78,7 +115,8 @@ export async function refresh({ force = false } = {}) {
       if (d) {
         log.info('cerebro', `IA local detectada: ${d.name} · modelo ${d.model}`);
         // Pré-carrega o modelo em segundo plano (a primeira pergunta não espera o carregamento).
-        warmUp().then((ok) => ok && log.info('cerebro', `Modelo ${d.model} carregado na memória`)).catch((e) => log.warn('cerebro', `Pré-carregamento do modelo falhou: ${e.message}`));
+        warmUp().then((ok) => ok && log.info('cerebro', `Modelo ${d.model} carregado na memória`)).catch((e) => log.warn('cerebro', `Pré-carregamento do modelo falhou: ${e.message}`))
+          .finally(() => autoTune(d));
       }
       return d;
     }).finally(() => { probing = null; });

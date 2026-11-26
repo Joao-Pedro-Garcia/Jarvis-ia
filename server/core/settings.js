@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS = {
   privacy: { saveConversationLogs: false, allowWebSearch: true },
   security: { safeMode: false },
   bible: { pageSizeOverride: 0 },
-  ai: { threads: 0 }, // núcleos para a IA local (0 = automático); definido pelo teste de velocidade
+  ai: { threads: 0, tunedFor: '' }, // núcleos para a IA local (0 = automático) e o modelo para o qual foi medido
 };
 
 function merge(base, patch) {

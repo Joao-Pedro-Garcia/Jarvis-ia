@@ -129,3 +129,39 @@ test('"teste a velocidade da IA": mede núcleos em segundo plano, escolhe o mais
   await processInput('qual o maior oceano do mundo?', { sessionId: 'speed-bench-2' });
   assert.equal(chatBody.options.num_thread, 4, 'conversa usa os núcleos escolhidos');
 });
+
+test('primeiro uso de um modelo: ajusta os núcleos sozinho (uma vez só) e avisa a tela', async () => {
+  const { bus, EVENTS } = await import('../server/core/events.js');
+  const { getSettings } = await import('../server/core/settings.js');
+  delete process.env.JARVIS_AUTOTUNE;
+  const rate = { 2: 12, 4: 8, 8: 5 }; // aqui 2 núcleos é o mais rápido
+  let starts = 0;
+  const onStart = () => { starts++; };
+  bus.on(EVENTS.AI_BENCHMARK_START, onStart);
+  mock = mockFetch([
+    ['127.0.0.1:11434/api/tags', () => jsonResponse({ models: [{ name: 'llama3.2:1b' }] })],
+    ['127.0.0.1:11434/api/generate', (u, o) => {
+      const b = JSON.parse(o.body);
+      if (!b.prompt) return jsonResponse({ done: true });
+      const t = b.options.num_thread;
+      return jsonResponse({ prompt_eval_count: 40, prompt_eval_duration: (40 / rate[t]) * 1e9, eval_count: 16, eval_duration: (16 / rate[t]) * 1e9 });
+    }],
+  ]);
+  try {
+    const done = new Promise((resolve) => bus.once(EVENTS.AI_BENCHMARK_DONE, (evt) => resolve(evt.payload)));
+    await llm.refresh({ force: true });
+    const payload = await done;
+    assert.equal(payload.auto, true);
+    assert.equal(payload.best.threads, 2);
+    assert.equal(getSettings().ai.threads, 2);
+    assert.equal(getSettings().ai.tunedFor, 'llama3.2:1b');
+    // Segunda detecção do mesmo modelo: não testa de novo.
+    local.resetLocal();
+    await llm.refresh({ force: true });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(starts, 1, 'o ajuste automático só roda uma vez por modelo');
+  } finally {
+    bus.off(EVENTS.AI_BENCHMARK_START, onStart);
+    process.env.JARVIS_AUTOTUNE = '0';
+  }
+});
