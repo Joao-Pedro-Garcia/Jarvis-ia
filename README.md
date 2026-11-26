@@ -119,6 +119,15 @@ e no comando “voz masculina”). Opções extras em Configurações → VOZ: *
 serviço não oficial do Edge — no teste real no celular foi recusada com HTTP 403) e *voz robótica offline*
 (eSpeak, `pkg install espeak`).
 
+### Começa dormindo · bom dia · clima
+Ao abrir, o JARVIS **começa dormindo** (tela escura, mantida ligada para ouvir). Acorda com **duas palmas**
+(principal) ou dizendo **“Jarvis”**: a tela acende, ele dá um **bom dia criativo** (frase da IA online quando
+responde em até 2,5 s; senão frases próprias que não se repetem) com o **clima real** de agora e já fica ouvindo.
+Desligue em Configurações → INTERFACE → “Começar dormindo”.
+Clima: **Open-Meteo** (gratuito, sem chave), cidade padrão **Araguaína-TO** (`JARVIS_WEATHER_CITY/LAT/LON`).
+Pergunte “como está o dia hoje?”, “vai chover?”, “previsão para amanhã”, “previsão da semana”. Sem dados, ele
+diz que não conseguiu — nunca inventa.
+
 ## 4. O que funciona offline e online
 
 | Sem internet (servidor acessível) | Precisa de internet |

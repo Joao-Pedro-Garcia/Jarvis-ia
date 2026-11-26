@@ -25,6 +25,8 @@ const selftest = await import('./core/selftest.js');
 const chats = await import('./core/chats.js');
 const groq = await import('./brain/ai/groq.js');
 const tts = await import('./modules/voice/tts.js');
+const greeting = await import('./brain/greeting.js');
+const weather = await import('./modules/weather/weather.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -251,6 +253,9 @@ async function api(req, res, url) {
       return send(res, 200, { ok: true, status: await llm.refresh({ force: true }) });
     }
     // Voz do JARVIS: texto → áudio (MP3 da voz neural ou WAV do eSpeak). 503 = o navegador usa a voz do celular.
+    // Bom dia criativo ao acordar (IA online se responder rápido; senão frases próprias) + clima real.
+    case 'GET /api/greeting': return send(res, 200, await greeting.wakeGreeting());
+    case 'GET /api/weather': return send(res, 200, await weather.getWeather());
     case 'GET /api/tts': return send(res, 200, tts.ttsStatus());
     case 'GET /api/tts/test': return send(res, 200, await tts.testNeural({ voice: url.searchParams.get('voice') || undefined }));
     case 'POST /api/tts': {

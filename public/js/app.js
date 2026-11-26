@@ -107,13 +107,15 @@ function clientInfo() {
 // Dormindo: tela apagada, só escuta duas palmas ou a palavra "Jarvis". Acorda com qualquer uma.
 let asleep = false;
 const SLEEP_RE = /^(jarvis )?(dorme|durma|modo dormir|pode dormir|descansa|descanse|modo sono|modo descanso)( jarvis)?$/;
-function sleepNow() {
+function sleepNow({ quiet = false } = {}) {
   if (asleep) return;
   asleep = true;
   stopAll();
   document.body.classList.add('asleep');
   setState('standby', 'DORMINDO');
-  addMsg('system', '💤 Modo dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.', 'SISTEMA');
+  if (!quiet) addMsg('system', '💤 Modo dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.', 'SISTEMA');
+  // Dormindo, a tela precisa ficar ligada (bem escura) para o microfone ouvir as palmas.
+  setKeepAwake(true).catch(() => {});
   // os detectores de ativação precisam estar ligados para acordar
   const s = getSettings();
   if (!s.clap.enabled || !s.hearing.wakeWord) {
@@ -127,9 +129,23 @@ function wakeUp(how) {
   if (!asleep) return false;
   asleep = false;
   document.body.classList.remove('asleep');
+  document.body.classList.add('waking'); setTimeout(() => document.body.classList.remove('waking'), 1200);
+  core?.pulse(1);
   setState('standby');
+  setKeepAwake(!!getSettings()?.ui?.keepAwake).catch(() => {});
   addMsg('system', `🔔 Acordei (${how}).`, 'SISTEMA');
   return true;
+}
+/** Ao acordar: bom dia criativo (com clima real, se houver) e já fica ouvindo. */
+async function greetOnWake() {
+  const h = new Date().getHours();
+  const nome = lastStatus?.personality?.nome_usuario;
+  let g = null;
+  try { g = await api.get('/api/greeting', { timeout: 4000 }); } catch { /* servidor fora: saudação simples */ }
+  const text = g?.text || `${h >= 5 && h < 12 ? 'Bom dia' : h < 18 && h >= 12 ? 'Boa tarde' : 'Boa noite'}${nome ? `, ${nome}` : ''}! Sistemas prontos. Como posso ajudar?`;
+  addMsg('jarvis', text, { tag: 'SISTEMA' });
+  await say(text);
+  if (!asleep && !busy && !isListening()) startListening({ chime: true, quiet: 'silence' });
 }
 
 async function handleInput(text, source = 'text') {
@@ -313,7 +329,7 @@ bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 // PALMS_DETECTED: duas palmas reconhecidas → "Sim?" → ouvir → cérebro → resposta.
 bus.on(EVENTS.PALMS_DETECTED, (evt) => {
   if (evt?.test) return; // teste do diagnóstico: não inicia conversa
-  if (asleep) { wakeUp('duas palmas'); startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
+  if (asleep) { wakeUp('duas palmas'); greetOnWake(); return; }
   if (isSpeaking() || isPaused()) { stopAll(); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;
   addMsg('system', '👏👏 Duas palmas detectadas');
@@ -322,7 +338,7 @@ bus.on(EVENTS.PALMS_DETECTED, (evt) => {
 bus.on(EVENTS.VOICE_RECEIVED, ({ text, wake: isWake }) => {
   if (!isWake) return;
   const woke = wakeUp('Jarvis');
-  if (woke && !(text && text.length > 1)) { startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
+  if (woke && !(text && text.length > 1)) { greetOnWake(); return; }
   if (text && text.length > 1) handleInput(text, 'voice'); else startListening({ chime: false, greet: 'Sim?', quiet: 'silence' });
 });
 bus.on('bible:message', (msg) => { addMsg('jarvis', msg, { tag: 'BÍBLIA' }); if (/concluíd/.test(msg)) say(msg); });
@@ -450,7 +466,7 @@ $('#command-form').addEventListener('submit', (e) => {
 });
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening());
 $('#core-button').addEventListener('click', () => {
-  if (asleep) { wakeUp('toque'); startListening({ chime: false, greet: 'Sim?', quiet: 'silence' }); return; }
+  if (asleep) { wakeUp('toque'); greetOnWake(); return; }
   return isSpeaking() || isPaused() ? stopAll() : startListening();
 });
 $('#stop-btn').addEventListener('click', stopAll);
@@ -701,6 +717,12 @@ async function boot() {
     const cmd = new URLSearchParams(location.search).get('cmd');
     const SHORT = { biblia: 'Bíblia', noticias: 'Notícias', 'meu-dia': 'Meu dia' };
     if (SHORT[cmd]) { window.history.replaceState(null, '', '/'); setTimeout(() => handleInput(SHORT[cmd]), 400); }
+    if (s?.ui?.startAsleep !== false && !SHORT[cmd]) {
+      // Começa DORMINDO: só acorda com duas palmas (principal) ou "Jarvis".
+      addMsg('system', `💤 ${!serverReachable ? 'Servidor inacessível — funções locais. ' : ''}JARVIS dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.`, 'SISTEMA');
+      sleepNow({ quiet: true });
+      return;
+    }
     addMsg('jarvis', `${greet} ${!serverReachable ? OFFLINE_NOTICE : ai?.configured ? `Como posso ajudar? (${ai.state})` : 'Estou no modo local inteligente (IA conversacional não configurada no servidor). Diga “ajuda” para ver os comandos.'}`, { tag: 'SISTEMA' });
     say(greet);
   }, { once: true });

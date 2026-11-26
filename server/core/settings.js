@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   voice: { enabled: true, silent: false, bargeIn: true, rate: 1.05, pitch: 1, volume: 1, lang: 'pt-BR', voiceName: '', maxSpokenChars: 600, engine: 'celular', neuralVoice: 'pt-BR-AntonioNeural' },
   hearing: { lang: 'pt-BR', silenceMs: 1800, continuousConversation: true, wakeWord: false, wakeWordName: 'jarvis' },
   clap: { enabled: false, sensitivity: 0.6, minGapMs: 120, maxGapMs: 700, maxClapMs: 110, cooldownMs: 2500, thresholdOverride: 0 },
-  ui: { theme: 'ciano', animations: true, mode: 'desempenho', particles: true, keepAwake: false },
+  ui: { theme: 'ciano', animations: true, mode: 'desempenho', particles: true, keepAwake: false, startAsleep: true },
   notifications: { enabled: false },
   privacy: { saveConversationLogs: false, allowWebSearch: true },
   security: { safeMode: false },

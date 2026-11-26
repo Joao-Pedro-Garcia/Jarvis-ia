@@ -6,6 +6,7 @@
 import * as reading from '../modules/bible/reading.js';
 import { findReference, refLabel } from '../modules/bible/books.js';
 import * as news from '../modules/news/news.js';
+import * as weather from '../modules/weather/weather.js';
 import * as memory from '../modules/memory/memory.js';
 import * as house from '../modules/house/house.js';
 import { tryMath, formatNumber } from '../modules/engineering/math.js';
@@ -92,6 +93,7 @@ export const HELP_TEXT = [
   '✅ Tarefas — "me lembra de estudar às 19h", "minhas tarefas", "concluí essa", "adia para amanhã"',
   '🧠 Memória — "lembre que…", "o que você lembra sobre…", "esqueça isso"',
   '🗓 Rotina — "meu dia"',
+  '🌤 Clima — "como está o dia hoje?", "vai chover?", "previsão para amanhã"',
   '🏠 Casa — "ligar a luz da sala" (requer Home Assistant)',
   '🔧 Engenharia — "15% de 230", "converter 10 km em milhas", "12 volts e 4 ohms"',
   '🚗 Motor — "potência com 300 Nm a 4000 rpm", "me ajuda com esse motor"',
@@ -207,6 +209,8 @@ registerCommand({
       lines.push(`📖 Bíblia: ${done ? `leitura de hoje concluída (${bible.plan.label})` : `${bible.plan.label} — ${bible.plan.done}/${bible.plan.total} capítulos`} · sequência ${bible.streak} dia(s)`);
       speech.push(done ? 'A leitura bíblica de hoje já está concluída.' : `Leitura bíblica: ${bible.plan.label}.`);
     } else if (bible) { lines.push(`📖 Bíblia: próxima leitura começa em ${bible.position.label}`); speech.push(`Leitura bíblica pendente, começando em ${bible.position.label}.`); }
+    const w = await weather.weatherFast(2000); // cache + tempo limite: não atrasa sem internet
+    if (w?.ok && !w.stale) { const d = w.days[0]; lines.push(`🌤 Clima em ${w.city}: ${w.now.temp} °C agora, ${d.desc}, ${d.min}–${d.max} °C${d.rainChance != null ? `, chuva ${d.rainChance}%` : ''}`); speech.push(weather.weatherHook(w)); }
     if (ex?.ok) { const usd = ex.rates.find((r) => r.code === 'USD'); if (usd) lines.push(`💰 Dólar: R$ ${usd.value.toFixed(2).replace('.', ',')} (${new Date(usd.updatedAt).toLocaleTimeString('pt-BR', { timeZone: process.env.JARVIS_TIMEZONE || 'America/Araguaina', hour: '2-digit', minute: '2-digit' })})`); }
     if (t.upcoming.length) lines.push(`📅 Próximos: ${t.upcoming.map((x) => tasks.describe(x)).join('; ')}`);
     lines.push(online ? '📰 Diga "Notícias" para o resumo do dia.' : '📡 Sem internet: notícias e câmbio indisponíveis.');
@@ -387,6 +391,43 @@ registerCommand({
       return say(`${story.title}. ${story.summary} (Não consegui aprofundar agora: ${err.message}.)`, { ui: { panel: 'news-detail', story } });
     }
   },
+});
+
+// ---- CLIMA (Open-Meteo, gratuito; cidade padrão Araguaína-TO) ----
+const WEATHER_WORDS = /\b(clima|tempo|previsao|temperatura|chuva|chover|calor|frio|quente|graus|sol|nublado|umidade)\b/;
+registerCommand({
+  name: 'weather.rain', module: 'CLIMA', priority: 72, description: 'Vai chover?',
+  aliases: ['Vai chover hoje?'],
+  patterns: [/\b(vai chover|vai ter chuva|chance de chuva|probabilidade de chuva|previsao de chuva|chove hoje|tem chuva hoje)\b/],
+  params: (t) => ({ tomorrow: /\bamanha\b/.test(t) }),
+  action: async ({ tomorrow }) => {
+    const w = await weather.weatherFast();
+    return say(weather.weatherText(w, tomorrow ? 'tomorrow' : 'rain'));
+  },
+});
+registerCommand({
+  name: 'weather.tomorrow', module: 'CLIMA', priority: 71, description: 'Previsão para amanhã',
+  aliases: ['Previsão para amanhã'],
+  patterns: [(t) => (/\bamanha\b/.test(t) && WEATHER_WORDS.test(t) && !/\b(lembr|tarefa|agend|despert|alarme)\w*/.test(t) ? [t] : null)],
+  action: async () => say(weather.weatherText(await weather.weatherFast(), 'tomorrow')),
+});
+registerCommand({
+  name: 'weather.week', module: 'CLIMA', priority: 71, description: 'Previsão dos próximos dias',
+  aliases: ['Previsão da semana'],
+  patterns: [/\bprevisao (do tempo )?(para|pra|da|de|dos) (a |os )?(semana|proximos dias|fim de semana)\b/, /\b(clima|tempo) (da|na|nesta|essa) semana\b/, /\bproximos dias\b.*\b(clima|tempo|chuva|previsao)\b/],
+  action: async () => say(weather.weatherText(await weather.weatherFast(), 'week')),
+});
+registerCommand({
+  name: 'weather.today', module: 'CLIMA', priority: 70, description: 'Clima agora e previsão de hoje',
+  aliases: ['Como está o dia hoje?', 'Como está o tempo?', 'Previsão do tempo', 'Qual a temperatura?'],
+  patterns: [
+    /\bcomo (o )?(dia|tempo|clima) (esta|ta|vai|ficou)\b/,
+    /\bcomo (esta|ta|vai|ficou) (o )?(dia|tempo|clima)\b(?! (de|da|do) (trabalho|reuniao|tarefa))/,
+    /\b(previsao do tempo|previsao de hoje|clima (de )?hoje|clima agora|o clima|qual (e |eh )?(o )?clima|tempo (la )?fora|como (esta|ta) la fora)\b/,
+    /\b(qual|quanto)\w* (e |esta |ta )?(a )?temperatura\b/, /\btemperatura (agora|de hoje|hoje|la fora|em \w+)\b/, /^(clima|tempo|previsao|temperatura)( hoje| agora)?$/,
+    /\b(esta|ta) (fazendo )?(muito )?(calor|frio|quente)\b/, /\bquantos graus\b/,
+  ],
+  action: async () => say(weather.weatherText(await weather.weatherFast(), 'today')),
 });
 
 registerCommand({

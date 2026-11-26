@@ -33,7 +33,7 @@ export const fuelFast = (uf = 'TO') => withBudget(getFuel(uf).catch((e) => ({ ok
 
 /** Busca tudo em segundo plano (ao iniciar o servidor) para a primeira pergunta ser instantânea. */
 export function prefetch() {
-  return Promise.allSettled([getExchange(), getFuel('TO'), fetchAll()]);
+  return Promise.allSettled([getExchange(), getFuel('TO'), fetchAll(), import('../weather/weather.js').then((w) => w.getWeather())]);
 }
 
 const HISTORY = 'news-history';

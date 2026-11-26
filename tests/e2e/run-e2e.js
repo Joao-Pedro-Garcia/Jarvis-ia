@@ -63,6 +63,13 @@ const INIT = () => {
   window.__cancelled = 0;
   class FakeRecognition {
     start() {
+      // Escuta contínua do nome "Jarvis" (ligada pelo modo dormindo): fica aberta e não
+      // consome as frases simuladas — só "ouve" se a frase da fila tiver "jarvis".
+      if (this.continuous && this.interimResults === false) {
+        this.__wake = true;
+        setTimeout(() => this.onstart?.(), 30);
+        return;
+      }
       // Durante a fala do JARVIS, o reconhecimento é o de "interrupção por voz".
       if (window.speechSynthesis.speaking) {
         const t = window.__bargeQueue.shift();
@@ -77,7 +84,7 @@ const INIT = () => {
         setTimeout(() => this.onend?.(), 50);
       }, 400);
     }
-    stop() {} abort() { this.onend?.(); }
+    stop() { if (this.__wake) setTimeout(() => this.onend?.(), 10); } abort() { this.onend?.(); }
   }
   window.SpeechRecognition = FakeRecognition;
   window.webkitSpeechRecognition = FakeRecognition;
@@ -150,7 +157,9 @@ try {
     assert(/Cérebro online/.test(log) && /Voz online/.test(log) && /Memória online/.test(log) && /JARVIS pronto/.test(log), log);
     await page.click('#boot-start');
     await page.waitForSelector('#boot', { state: 'detached' });
-    return log.replace(/\s+/g, ' ').slice(0, 90);
+    // Começa DORMINDO, com palmas e "Jarvis" ligados para acordar.
+    await page.waitForFunction(() => document.body.classList.contains('asleep') && /dormindo/.test(document.getElementById('transcript').textContent));
+    return `${log.replace(/\s+/g, ' ').slice(0, 70)} · começou dormindo`;
   });
   await step('3. Diagnóstico com semáforo (16 componentes, motivo ao tocar)', async () => {
     await page.keyboard.press('d');
@@ -162,9 +171,9 @@ try {
   });
   await step('4. Permitir microfone + teste REAL de microfone (getUserMedia)', async () => {
     await page.click('#diag-mic');
-    await page.waitForSelector('.toast:not([hidden])', { timeout: 8000 });
-    const t = await page.textContent('#toast');
-    assert(/Microfone captando som/.test(t), t);
+    // (o aviso das palmas, ligadas pelo modo dormindo, pode aparecer antes: espera o do teste)
+    await page.waitForFunction(() => /Microfone captando som/.test(document.getElementById('toast')?.textContent || ''), null, { timeout: 8000 })
+      .catch(async () => { throw new Error(await page.textContent('#toast')); });
     await closeSheets(page);
     return 'áudio do microfone falso do Chromium';
   });
@@ -178,10 +187,13 @@ try {
     await closeSheets(page);
     return 'voz do celular (síntese SIMULADA) · instruções da voz masculina presentes';
   });
-  await step('6–7. Duas palmas (áudio real) → "Sim?" → pergunta por voz → resposta falada', async () => {
+  await step('6–7. Dormindo → duas palmas (áudio real) acordam → bom dia criativo → pergunta por voz → resposta', async () => {
     await page.evaluate(() => window.__transcripts.push('Que horas são?'));
-    await page.waitForFunction(() => window.__spoken.includes('Sim?'), null, { timeout: 20000 });
-    await page.waitForFunction(() => window.__spoken.some((s) => /^Agora são/.test(s)), null, { timeout: 15000 });
+    await page.waitForFunction(() => window.__spoken.some((s) => /^(Bom dia|Boa tarde|Boa noite).*Como posso ajudar\?$/.test(s)), null, { timeout: 20000 });
+    assert(!(await page.evaluate(() => document.body.classList.contains('asleep'))), 'continuou dormindo');
+    await page.waitForFunction(() => window.__spoken.some((s) => /^Agora são/.test(s)), null, { timeout: 15000 })
+      .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} · falado: ${JSON.stringify(await page.evaluate(() => window.__spoken.slice(-6)))} · tela: ${(await page.evaluate(() => document.getElementById('transcript').textContent.slice(-300))).replace(/\s+/g, ' ')}`); });
+    return (await page.evaluate(() => window.__spoken.find((s) => /^(Bom dia|Boa tarde|Boa noite)/.test(s)))).slice(0, 80);
   });
   await step('8. Interrupção: "pare" durante a fala interrompe na hora', async () => {
     await page.evaluate(() => { window.__bargeQueue.push('pare'); window.__cancelled = 0; });
@@ -295,7 +307,8 @@ try {
   });
   await step('25. "Faça um diagnóstico" → testes reais → "Diagnóstico concluído"', async () => {
     await say(page, 'JARVIS, faça um diagnóstico');
-    await page.waitForFunction(() => /Diagnóstico concluído/.test(document.getElementById('selftest-sum')?.textContent || ''), null, { timeout: 120000 });
+    await page.waitForFunction(() => /Diagnóstico concluído/.test(document.getElementById('selftest-sum')?.textContent || ''), null, { timeout: 120000 })
+      .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} · tabela: ${(await page.evaluate(() => document.querySelector('.diag-table')?.textContent || document.getElementById('transcript')?.textContent.slice(-300) || '')).replace(/\s+/g, ' ').slice(0, 400)}`); });
     const sum = await page.textContent('#selftest-sum');
     await page.screenshot({ path: path.join(SHOTS, '04-autodiagnostico.png') });
     await closeSheets(page);

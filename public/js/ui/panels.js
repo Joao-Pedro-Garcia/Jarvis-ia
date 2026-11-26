@@ -154,6 +154,7 @@ export async function showSettings({ onChange } = {}) {
       <fieldset class="fieldset"><legend>INTERFACE</legend>
         <div class="field"><label>Tema</label><select data-k="ui.theme">${[['ciano', 'Ciano'], ['ambar', 'Âmbar'], ['verde', 'Verde']].map(([v, l]) => `<option value="${v}" ${v === s.ui.theme ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label>Modo</label><select data-k="ui.mode"><option value="desempenho" ${s.ui.mode === 'desempenho' ? 'selected' : ''}>Desempenho (visual completo)</option><option value="economico" ${s.ui.mode === 'economico' ? 'selected' : ''}>Econômico (menos CPU/bateria)</option></select></div>
+        <label class="switch">Começar dormindo (acorda com 2 palmas ou “Jarvis”) <input type="checkbox" data-k="ui.startAsleep" ${s.ui.startAsleep !== false ? 'checked' : ''}></label>
         <label class="switch">Animações <input type="checkbox" data-k="ui.animations" ${s.ui.animations ? 'checked' : ''}></label>
         <label class="switch">Partículas <input type="checkbox" data-k="ui.particles" ${s.ui.particles ? 'checked' : ''}></label>
         <label class="switch">Manter tela ligada com o JARVIS aberto <input type="checkbox" data-k="ui.keepAwake" ${s.ui.keepAwake ? 'checked' : ''}></label>
