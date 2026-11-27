@@ -527,12 +527,19 @@ function renderAttach() {
 }
 function clearAttach() { for (const a of attached) URL.revokeObjectURL(a.url); attached = []; renderAttach(); }
 $('#attach-btn').addEventListener('click', () => $('#attach-input').click());
-$('#attach-input').addEventListener('change', (e) => {
-  const { items, note } = attach.classify(e.target.files, attached);
+$('#attach-input').addEventListener('change', async (e) => {
+  const input = e.target;
+  // Copia os arquivos para a memória NA HORA: no Android, a permissão de leitura de fotos
+  // do Google Fotos/nuvem expira logo depois ("The requested file could not be read").
+  const picked = [...input.files];
+  const { copies, failed } = await attach.copyFiles(picked);
+  input.value = '';
+  if (failed) toast(attach.READ_HELP);
+  if (!copies.length) return;
+  const { items, note } = attach.classify(copies, attached);
   for (const a of attached) if (!items.includes(a)) URL.revokeObjectURL(a.url);
   attached = items.map((it) => (it.url ? it : { ...it, url: URL.createObjectURL(it.file) }));
   if (note) toast(note);
-  e.target.value = '';
   renderAttach();
   // miniaturas em segundo plano (data URL: funciona mesmo onde blob: é bloqueado)
   for (const a of attached) if (a.kind === 'image' && !a.thumb) attach.thumbnail(a.file).then((t) => { if (t) { a.thumb = t; renderAttach(); } }).catch(() => {});
@@ -545,7 +552,7 @@ async function sendWithMedia(text) {
   try {
     setState('thinking', 'PREPARANDO');
     media = await attach.prepare(items, (step) => { $('#interim').textContent = step; });
-  } catch (err) { setState('standby'); toast(err.message); return; }
+  } catch (err) { setState('standby'); toast(attach.friendlyError(err)); return; }
   finally { $('#interim').textContent = ''; for (const a of items) URL.revokeObjectURL(a.url); }
   if (media.kind === 'video' && !media.transcript) clientLog('interface', 'Vídeo sem áudio transcrito (sem áudio, grande demais ou formato .mov)');
   return handleInput(text, 'text', { media });

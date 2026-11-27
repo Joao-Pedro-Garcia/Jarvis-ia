@@ -4,6 +4,26 @@
 //   • vídeo: 4 quadros espalhados pelo vídeo (768 px) + o próprio vídeo para o Whisper
 //     transcrever o áudio (se tiver até 24 MB).
 const MAX_IMAGES = 5;
+const MAX_COPY = 80 * 1024 * 1024; // vídeos maiores ficam só como referência
+export const READ_HELP = 'O Android não deixou ler esse arquivo. Escolha pela Galeria (não pelo Google Fotos/nuvem), ou tire um print da imagem e envie o print.';
+
+/** Erros do navegador (em inglês) → português. */
+export function friendlyError(err) {
+  const m = String(err?.message || err || '');
+  if (err?.name === 'NotReadableError' || /could not be read|NotReadable|permission/i.test(m)) return READ_HELP;
+  if (err?.name === 'NotFoundError' || /not be found/i.test(m)) return 'O arquivo não foi encontrado (foi apagado ou movido). Escolha de novo.';
+  return m || 'Não consegui preparar o anexo.';
+}
+
+/** Copia os arquivos escolhidos para a memória imediatamente (a permissão do Android expira). */
+export async function copyFiles(files) {
+  const copies = []; let failed = 0;
+  for (const f of files) {
+    if (f.size > MAX_COPY) { copies.push(f); continue; }
+    try { copies.push(new File([await f.arrayBuffer()], f.name || 'arquivo', { type: f.type || (/\.(heic|heif)$/i.test(f.name) ? 'image/heic' : '') })); } catch { failed++; }
+  }
+  return { copies, failed };
+}
 const MAX_VIDEO_AUDIO = 24 * 1024 * 1024;
 
 function canvasJpeg(source, w, h, max, quality) {
