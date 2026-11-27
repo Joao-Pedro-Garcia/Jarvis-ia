@@ -14,14 +14,43 @@ function canvasJpeg(source, w, h, max, quality) {
   return c.toDataURL('image/jpeg', quality);
 }
 
+const readAsDataUrl = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = () => reject(r.error); r.readAsDataURL(file); });
+const loadImg = (src) => new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => reject(new Error('imagem ilegível')); i.src = src; });
+
+/**
+ * Abre a foto de 3 jeitos (o Android varia muito): 1) createImageBitmap (rápido, gira a
+ * foto certo); 2) FileReader → <img>; 3) se o navegador não sabe abrir (ex.: HEIC), manda o
+ * arquivo original quando for pequeno — o Gemini entende HEIC.
+ */
+export async function decodeImage(file) {
+  if (typeof createImageBitmap === 'function') {
+    try { const b = await createImageBitmap(file, { imageOrientation: 'from-image' }); return { src: b, w: b.width, h: b.height }; } catch { /* tenta o próximo */ }
+  }
+  try { const img = await loadImg(await readAsDataUrl(file)); return { src: img, w: img.naturalWidth, h: img.naturalHeight }; } catch { /* tenta o próximo */ }
+  return null;
+}
+
 export async function imageToDataUrl(file, max = 1280) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => reject(new Error('Não consegui abrir essa imagem.')); i.src = url; });
-    let q = 0.82; let out = canvasJpeg(img, img.naturalWidth, img.naturalHeight, max, q);
-    while (out.length > 3.5e6 && q > 0.4) { q -= 0.15; out = canvasJpeg(img, img.naturalWidth, img.naturalHeight, max, q); }
+  const d = await decodeImage(file);
+  if (d) {
+    let q = 0.82; let out = canvasJpeg(d.src, d.w, d.h, max, q);
+    while (out.length > 3.5e6 && q > 0.4) { q -= 0.15; out = canvasJpeg(d.src, d.w, d.h, max, q); }
+    d.src.close?.();
     return out;
-  } finally { URL.revokeObjectURL(url); }
+  }
+  // Não deu para abrir aqui: envia o original (HEIC/HEIF etc.) se couber no limite.
+  if (file.size <= 3.4e6 && /^image\/(heic|heif|jpeg|png|webp)$/.test(file.type || '')) return readAsDataUrl(file);
+  throw new Error(/heic|heif/.test(file.type || file.name || '') ? 'Essa foto está em HEIC e é grande demais para enviar sem converter. Tire um print dela e envie o print.' : 'Não consegui abrir essa imagem. Tente outra, ou tire um print dela e envie o print.');
+}
+
+/** Miniatura (data URL) para a pré-visualização — não depende de blob: nem do formato. */
+export async function thumbnail(file) {
+  if (/^video\//.test(file.type)) return null;
+  const d = await decodeImage(file);
+  if (!d) return null;
+  const t = canvasJpeg(d.src, d.w, d.h, 160, 0.7);
+  d.src.close?.();
+  return t;
 }
 
 export async function videoFrames(file, n = 4, max = 768) {

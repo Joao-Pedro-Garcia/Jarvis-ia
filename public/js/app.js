@@ -516,7 +516,8 @@ function renderAttach() {
   box.replaceChildren(...attached.map((a, i) => {
     const d = document.createElement('div'); d.className = 'att';
     const el = document.createElement(a.kind === 'video' ? 'video' : 'img');
-    el.src = a.url; if (a.kind === 'video') { el.muted = true; el.playsInline = true; }
+    if (a.kind === 'video') { el.src = a.url; el.muted = true; el.playsInline = true; } else if (a.thumb) el.src = a.thumb;
+    if (a.kind !== 'video' && !a.thumb) el.alt = '📷';
     const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Remover anexo');
     x.addEventListener('click', () => { URL.revokeObjectURL(a.url); attached.splice(i, 1); renderAttach(); });
     const k = document.createElement('span'); k.className = 'kind'; k.textContent = a.kind === 'video' ? '🎬' : '📷';
@@ -533,6 +534,8 @@ $('#attach-input').addEventListener('change', (e) => {
   if (note) toast(note);
   e.target.value = '';
   renderAttach();
+  // miniaturas em segundo plano (data URL: funciona mesmo onde blob: é bloqueado)
+  for (const a of attached) if (a.kind === 'image' && !a.thumb) attach.thumbnail(a.file).then((t) => { if (t) { a.thumb = t; renderAttach(); } }).catch(() => {});
   $('#command-input').focus();
 });
 async function sendWithMedia(text) {

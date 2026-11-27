@@ -8,7 +8,7 @@ import { getPersonality } from './personality.js';
 import * as memory from '../modules/memory/memory.js';
 import { log } from '../core/logger.js';
 
-const DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+const DATA_URL = /^data:image\/(jpeg|png|webp|heic|heif);base64,[A-Za-z0-9+/=]+$/;
 const MAX_IMAGE_CHARS = 3.8 * 1024 * 1024; // limite do Groq para imagem em base64 (≈4 MB)
 
 /** Valida o que veio do navegador. Lança erro com status 400 se algo estiver errado. */
@@ -30,7 +30,8 @@ export const GEMINI_HELP = 'Para eu enxergar imagens de graça, conecte o Google
 /** Responde sobre a mídia. Tenta o Groq (se a conta tiver visão) e depois o Gemini. Nunca inventa. */
 export async function answer(text, media, sess) {
   const providers = [];
-  if (groq.groqProvider.configured()) providers.push({ id: 'groq', name: 'Groq', see: groq.seeImages, friendly: (e) => (e.code === 'NO_VISION' ? e.message : groq.groqProvider.friendlyError(e)) });
+  const onlyCommon = media.images.every((u) => /^data:image\/(jpeg|png|webp);/.test(u)); // HEIC: só o Gemini entende
+  if (groq.groqProvider.configured() && onlyCommon) providers.push({ id: 'groq', name: 'Groq', see: groq.seeImages, friendly: (e) => (e.code === 'NO_VISION' ? e.message : groq.groqProvider.friendlyError(e)) });
   if (gemini.configured()) providers.push({ id: 'gemini', name: 'Gemini', see: gemini.seeImages, friendly: gemini.friendlyError });
   if (!providers.length) return { text: `Ainda não consigo enxergar imagens. ${GEMINI_HELP}`, source: 'local', ok: false };
   const p = getPersonality();
