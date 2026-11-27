@@ -23,7 +23,14 @@ export function storedKey() {
 const key = () => process.env.GROQ_API_KEY || storedKey();
 export const keySource = () => (process.env.GROQ_API_KEY ? 'env' : storedKey() ? 'saved' : null);
 // Formato não é imposto (pode mudar): a chave é TESTADA de verdade no Groq antes de salvar.
-export const validKeyFormat = (k) => typeof k === 'string' && /^[A-Za-z0-9_\-]{20,200}$/.test(k.trim());
+export function extractKey(raw) {
+  const s = String(raw || '');
+  const m = s.match(/gsk_[0-9A-Za-z]{20,}/);
+  if (m) return m[0];
+  const token = s.replace(/^[\s\S]*?(?:API_KEY|key)\s*[=:]\s*/i, '').replace(/["'`\s]/g, '');
+  return /^[\w.\-]{20,200}$/.test(token) ? token : '';
+}
+export const validKeyFormat = (k) => !!extractKey(k);
 
 /** Modelos de conversa disponíveis na conta (ids). Lança erro com .status em falha. */
 export async function listModels(k = key(), timeoutMs = 8000) {
@@ -49,8 +56,8 @@ export function pickModel(ids, wanted = process.env.GROQ_MODEL) {
 
 /** Testa a chave de verdade (lista os modelos) e guarda criptografada. */
 export async function saveKey(k) {
-  const clean = String(k || '').trim();
-  if (!validKeyFormat(clean)) throw Object.assign(new Error('Essa não parece uma chave do Groq. Copie a chave inteira (no Groq ela costuma começar com gsk_).'), { status: 400 });
+  const clean = extractKey(k);
+  if (!clean) throw Object.assign(new Error('Essa não parece uma chave do Groq. Copie a chave inteira (no Groq ela costuma começar com gsk_).'), { status: 400 });
   let ids;
   try { ids = await listModels(clean); } catch (err) { throw Object.assign(new Error(groqProvider.friendlyError(err)), { status: err.status === 401 || err.status === 403 ? 400 : 502 }); }
   const model = pickModel(ids);

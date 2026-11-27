@@ -16,7 +16,18 @@ export function storedKey() {
 const key = () => process.env.GEMINI_API_KEY || storedKey();
 export const configured = () => !!key();
 export const keySource = () => (process.env.GEMINI_API_KEY ? 'env' : storedKey() ? 'saved' : null);
-export const validKeyFormat = (k) => typeof k === 'string' && /^[A-Za-z0-9_\-]{30,80}$/.test(k.trim());
+/**
+ * Acha a chave no que foi colado (o celular às vezes copia junto espaços, aspas, quebras de
+ * linha ou "GEMINI_API_KEY=…"). Quem decide se ela vale é o próprio Google, no teste.
+ */
+export function extractKey(raw) {
+  const s = String(raw || '');
+  const m = s.match(/AIza[0-9A-Za-z_\-]{20,}/);
+  if (m) return m[0];
+  const token = s.replace(/^[\s\S]*?(?:API_KEY|key)\s*[=:]\s*/i, '').replace(/["'`\s]/g, '');
+  return /^[\w.\-]{20,200}$/.test(token) ? token : '';
+}
+export const validKeyFormat = (k) => !!extractKey(k);
 
 async function call(path, { method = 'GET', body, timeoutMs = 10000, k = key() } = {}) {
   const ctrl = new AbortController();
@@ -55,8 +66,8 @@ export function pickModel(ids, wanted = process.env.GEMINI_MODEL) {
 }
 
 export async function saveKey(k) {
-  const clean = String(k || '').trim();
-  if (!validKeyFormat(clean)) throw Object.assign(new Error('Essa não parece uma chave do Google AI Studio. Copie a chave inteira (costuma começar com AIza).'), { status: 400 });
+  const clean = extractKey(k);
+  if (!clean) throw Object.assign(new Error('Não achei uma chave no que foi colado. No AI Studio, toque no ícone de copiar ao lado da chave (começa com AIza) e cole aqui.'), { status: 400 });
   let ids;
   try { ids = await listModels(clean); } catch (err) { throw Object.assign(new Error(friendlyError(err)), { status: err.status === 400 || err.status === 401 || err.status === 403 ? 400 : 502 }); }
   const model = pickModel(ids);
