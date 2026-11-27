@@ -2,7 +2,7 @@
 // - Interface disponível offline (cache dos arquivos estáticos).
 // - Dados (/api/) NUNCA vêm do cache: nada antigo é mostrado como atual.
 // - Nova versão: fica "esperando" até o usuário tocar em "Atualizar".
-const VERSION = '2.1.2';
+const VERSION = '2.1.3';
 const CACHE = `jarvis-${VERSION}`;
 const ASSETS = ['/', '/index.html', '/css/jarvis.css', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png',
   '/js/app.js', '/js/core/bus.js', '/js/core/api.js', '/js/core/state.js', '/js/core/settings.js', '/js/core/logger.js', '/js/core/offline-brain.js',

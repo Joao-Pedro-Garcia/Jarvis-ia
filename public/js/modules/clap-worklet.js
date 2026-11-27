@@ -1,6 +1,12 @@
 // AudioWorklet: roda na thread de áudio (preciso mesmo com a aba em 2º plano).
+// Envia, a cada 256 amostras, a energia (rms), o pico e a fração aguda (hf). Se pedirem
+// ("pcm": usado para ouvir "Jarvis" pelo mesmo microfone das palmas), envia também as amostras.
 class ClapAnalyzer extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(256); this.len = 0; }
+  constructor() {
+    super();
+    this.buf = new Float32Array(256); this.len = 0; this.pcm = false;
+    this.port.onmessage = (e) => { if (e.data && typeof e.data.pcm === 'boolean') this.pcm = e.data.pcm; };
+  }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (!ch) return true;
@@ -13,7 +19,7 @@ class ClapAnalyzer extends AudioWorkletProcessor {
         }
         const rms = Math.sqrt(sum / this.len);
         const hf = sum > 1e-12 ? Math.min(1, dsum / sum / 2) : 0;
-        this.port.postMessage({ rms, peak, hf, t: currentTime * 1000 });
+        this.port.postMessage(this.pcm ? { rms, peak, hf, t: currentTime * 1000, pcm: this.buf.slice(0) } : { rms, peak, hf, t: currentTime * 1000 });
         this.len = 0;
       }
     }

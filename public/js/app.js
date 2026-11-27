@@ -11,7 +11,7 @@ import { finishListening, holdWake, configureStt, listenOnce, stopListening, hea
 import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isSpeaking, pauseSpeaking, resumeSpeaking, isPaused, voiceSupported } from './modules/voice.js';
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
-import { setClapStrict } from './modules/clap.js';
+import { setClapStrict, setVoiceWake } from './modules/clap.js';
 import * as attach from './modules/attach.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
@@ -94,6 +94,7 @@ async function say(text) {
   // O detector de palmas ouviria a PRÓPRIA voz do JARVIS no alto-falante ("p", "t" parecem
   // palmas) e cortaria a fala no meio: fica pausado enquanto ele fala.
   speechClapHold++;
+  try {
   await wake?.pause();
   const speaking = speak(text);
   // Interrupção por voz (só depois que a fala começou). No Android, só se as
@@ -103,7 +104,10 @@ async function say(text) {
   await speaking.finally(() => holdWake(false));
   barge?.(); stopBargeIn();
   // Volta a ouvir palmas um instante depois (o fim do som não pode virar "palma").
-  setTimeout(() => { if (--speechClapHold === 0 && !isListening() && !listenStarting) wake?.resume(getSettings()); }, 350);
+  } finally {
+    // Sempre libera (mesmo se algo falhar no meio): senão as palmas ficariam desligadas para sempre.
+    setTimeout(() => { speechClapHold = Math.max(0, speechClapHold - 1); if (speechClapHold === 0 && !isListening() && !listenStarting) wake?.resume(getSettings()); }, 350);
+  }
   if (getState() === 'speaking') setState('standby');
 }
 
@@ -148,6 +152,8 @@ function sleepNow({ quiet = false } = {}) {
   setState('standby', 'DORMINDO');
   if (!quiet) addMsg('system', '💤 Modo dormindo. Bata duas palmas ou diga “Jarvis” para me acordar.', 'SISTEMA');
   setClapStrict(true); // dormindo: só palmas nítidas acordam (barulhos de casa não)
+  // Android: o "Jarvis" é ouvido pelo microfone das palmas (o do Google tiraria o microfone delas).
+  if (isAndroid || !hearingSupported) setVoiceWake(true, onWakeClip);
   // Dormindo, a tela precisa ficar ligada (bem escura) para o microfone ouvir as palmas.
   setKeepAwake(true).catch(() => {});
   // os detectores de ativação precisam estar ligados para acordar
@@ -164,6 +170,7 @@ function wakeUp(how) {
   asleep = false;
   document.body.classList.remove('asleep');
   setClapStrict(false);
+  setVoiceWake(false);
   document.body.classList.add('waking'); setTimeout(() => document.body.classList.remove('waking'), 1200);
   core?.pulse(1);
   setState('standby');
@@ -171,6 +178,23 @@ function wakeUp(how) {
   addMsg('system', `🔔 Acordei (${how}).`, 'SISTEMA');
   return true;
 }
+/** Trecho de fala ouvido enquanto dorme: o Whisper confere se foi "Jarvis". */
+const NAME_RE = /\b(jarvis|jarves|jarbas|djarvis|jarviz|jervis|jarvi)\b/i;
+async function onWakeClip(wav) {
+  if (!asleep) return;
+  try {
+    const res = await fetch('/api/stt', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wav });
+    if (!res.ok) return; // sem Groq: só as palmas acordam
+    const text = String((await res.json()).text || '');
+    const m = text.match(NAME_RE);
+    if (!m || !asleep) return;
+    clientLog('ouvido', 'Palavra de ativação ouvida pelo microfone das palmas');
+    wakeUp('Jarvis');
+    const rest = text.slice(m.index + m[0].length).replace(/^[\s,.!?]+/, '').trim();
+    if (rest.length > 2) handleInput(rest, 'voice'); else greetOnWake();
+  } catch { /* sem internet: as palmas continuam funcionando */ }
+}
+
 /** Ao acordar: bom dia criativo (com clima real, se houver) e já fica ouvindo. */
 async function greetOnWake() {
   const h = new Date().getHours();

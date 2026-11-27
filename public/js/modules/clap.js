@@ -23,6 +23,7 @@ export const clapStatus = () => ({ enabled, running: !!stream && !paused, paused
 
 function onFrame(frame) {
   if (paused) return;
+  if (voiceWake) voiceFrame(frame);
   const now = performance.now();
   if (frame.peak > maxPeak) maxPeak = frame.peak;
   if (now - lastLevelEmit > 60) { lastLevelEmit = now; bus.emit(EVENTS.CLAP_LEVEL, { peak: frame.peak, threshold: detector.threshold() }); }
@@ -49,11 +50,15 @@ export async function startClap(settings) {
     throw new Error(err.name === 'NotAllowedError' ? 'Permissão do microfone negada.' : `Microfone indisponível (${err.name}).`);
   }
   ctx = new (window.AudioContext || window.webkitAudioContext)();
+  // Um contexto de áudio criado fora de um toque pode nascer "suspenso" (sem som chegando):
+  // reativa já e sempre que a tela voltar a aparecer.
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* reativa no próximo toque */ } }
   source = ctx.createMediaStreamSource(stream);
   try {
     await ctx.audioWorklet.addModule('/js/modules/clap-worklet.js');
     node = new AudioWorkletNode(ctx, 'clap-analyzer');
     node.port.onmessage = (e) => onFrame(e.data);
+    if (voiceWake) node.port.postMessage({ pcm: true });
     mode = 'worklet';
     source.connect(node);
     // Saída muda: necessária em alguns navegadores para o processamento rodar.
@@ -81,7 +86,14 @@ export async function pauseClap() {
 
 export async function resumeClap(settings) {
   if (!enabled) return;
-  if (!stream) { try { await startClap(settings); } catch {} return; }
+  if (!stream) {
+    // Religar pode falhar se outro uso do microfone ainda não soltou: tenta de novo.
+    for (let i = 0; i < 3; i++) {
+      try { await startClap(settings); return; } catch (err) { clientLog('palmas', `Religar o detector falhou (${err.message}); tentando de novo`, 'warn'); await new Promise((r) => setTimeout(r, 1200)); }
+    }
+    return;
+  }
+  if (ctx?.state === 'suspended') { try { await ctx.resume(); } catch {} }
   detector.configure(settings || {});
   paused = false;
 }
@@ -97,6 +109,70 @@ export async function stopClap(keepEnabled = false) {
 }
 
 export function configureClap(settings) { detector.configure(settings || {}); }
+
+// Reativa o áudio se o navegador o suspendeu (tela apagou/voltou, outro app tocou som).
+const wakeAudio = () => { if (ctx?.state === 'suspended' && !paused) ctx.resume().catch(() => {}); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); });
+for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, wakeAudio, { passive: true });
+
+// ---------- "Jarvis" pelo MESMO microfone das palmas ----------
+// No Android o microfone é um só: se o reconhecimento do Google ficar ouvindo o nome, as
+// palmas recebem silêncio. Então, dormindo, guardamos os últimos segundos de áudio e,
+// quando alguém fala, mandamos só esse trecho curto para o Whisper conferir se foi "Jarvis".
+const RATE = 16000;
+const ring = new Int16Array(RATE * 4);
+let ringPos = 0; let total = 0; let frac = 0;
+let voiceWake = null;
+let vad = null;
+let lastClipAt = 0; let clipTimes = [];
+export function setVoiceWake(on, onClip) {
+  voiceWake = on ? { onClip } : null;
+  vad = null;
+  node?.port.postMessage({ pcm: !!on });
+  clientLog('palmas', on ? '"Jarvis" pelo microfone das palmas: ligado' : '"Jarvis" pelo microfone das palmas: desligado');
+}
+export const voiceWakeOn = () => !!voiceWake && mode === 'worklet';
+function pushPcm(f32) {
+  const step = (ctx?.sampleRate || 48000) / RATE;
+  let i = frac;
+  for (; i < f32.length; i += step) {
+    const a = Math.floor(i); const b = Math.min(f32.length, Math.floor(i + step));
+    let s = 0; for (let k = a; k < b; k++) s += f32[k];
+    const v = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
+    ring[ringPos] = v * 32767; ringPos = (ringPos + 1) % ring.length; total++;
+  }
+  frac = i - f32.length;
+}
+function clipWav(samples) {
+  const n = Math.min(samples, ring.length);
+  const b = new ArrayBuffer(44 + n * 2); const v = new DataView(b);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  let p = (ringPos - n + ring.length) % ring.length;
+  for (let i = 0; i < n; i++) { v.setInt16(44 + i * 2, ring[p], true); p = (p + 1) % ring.length; }
+  return new Blob([b], { type: 'audio/wav' });
+}
+function voiceFrame(f) {
+  if (f.pcm) pushPcm(f.pcm);
+  const now = performance.now();
+  const loud = f.rms > Math.max(detector.floor * 5, 0.008);
+  if (loud) {
+    if (!vad) vad = { startTotal: Math.max(0, total - RATE * 0.35), lastLoud: now, loudFrames: 0 };
+    vad.lastLoud = now; vad.loudFrames++;
+    return;
+  }
+  if (!vad) return;
+  const dur = (total - vad.startTotal) / RATE;
+  if (now - vad.lastLoud < 450 && dur < 3.2) return;
+  const seg = vad; vad = null;
+  // fala de verdade: entre ~0,4 s e 3,2 s, com várias janelas altas (palma é curta demais)
+  if (dur < 0.45 || dur > 3.4 || seg.loudFrames < 12) return;
+  clipTimes = clipTimes.filter((t) => now - t < 600000);
+  if (now - lastClipAt < 2500 || clipTimes.length >= 40) return; // não gasta o limite grátis com barulho
+  lastClipAt = now; clipTimes.push(now);
+  try { voiceWake?.onClip(clipWav(total - seg.startTotal)); } catch { /* ignora */ }
+}
 /** Dormindo: detecção rigorosa (só palmas nítidas acordam). */
 export function setClapStrict(on) { detector.configure({ strict: !!on }); clientLog('palmas', on ? 'Detecção rigorosa (dormindo)' : 'Detecção normal'); }
 
