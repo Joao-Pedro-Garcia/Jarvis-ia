@@ -9,6 +9,7 @@ const VISION_OK = /llama-4|vision-novo/;
 let models = ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'];
 let bodies = [];
 let gemBodies = [];
+let geminiBusy = [];
 let geminiModels = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'text-embedding-004', 'gemini-2.5-flash-preview-tts'];
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 globalThis.fetch = async (url, opts = {}) => {
@@ -28,6 +29,7 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (/generativelanguage\.googleapis\.com\/v1beta\/models\/.+:generateContent$/.test(u)) {
     gemBodies.push({ u, b: JSON.parse(opts.body), key: opts.headers['x-goog-api-key'] });
+    if (geminiBusy.some((m) => u.includes(`models/${m}:`))) return json({ error: { code: 503, message: 'The model is overloaded. Please try again later.', status: 'UNAVAILABLE' } }, 503);
     return json({ candidates: [{ content: { parts: [{ text: 'Gemini: é um print das configurações de voz.' }] } }] });
   }
   throw new TypeError('fetch failed');
@@ -44,7 +46,7 @@ const GKEY = 'AIzaSyTeste000000000000000000000000000';
 let base, server;
 before(async () => { ({ server } = createServer()); await new Promise((r) => server.listen(0, '127.0.0.1', r)); base = `http://127.0.0.1:${server.address().port}`; });
 after(() => { server.close(); globalThis.fetch = realFetch; });
-afterEach(() => { bodies = []; gemBodies = []; models = ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct']; groq.resetVision(); });
+afterEach(() => { bodies = []; gemBodies = []; geminiBusy = []; models = ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct']; groq.resetVision(); });
 const send = (body) => realFetch(`${base}/api/input/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const post = (path, body) => realFetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -123,6 +125,19 @@ test('Groq sem visão → o Gemini responde (imagem enviada como inline_data + c
   assert.equal(parts[1].inline_data.mime_type, 'image/jpeg');
   assert.equal(parts[1].inline_data.data, IMG.split(',')[1]);
   assert.match(g.b.systemInstruction.parts[0].text, /imagem/);
+});
+
+test('Gemini sobrecarregado (503): tenta de novo e passa para outro modelo da conta', async () => {
+  models = ['llama-3.3-70b-versatile'];
+  geminiBusy = ['gemini-2.5-flash'];
+  const r = await (await send({ text: 'e isso?', media: { kind: 'image', images: [IMG] } })).json();
+  assert.equal(r.text, 'Gemini: é um print das configurações de voz.');
+  const used = gemBodies.map((g) => g.u.match(/models\/(.+):/)[1]);
+  assert.deepEqual(used.slice(0, 3), ['gemini-2.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash']);
+  assert.match(r.source, /gemini-2\.0-flash/);
+  geminiBusy = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const r2 = await (await send({ text: 'e agora?', media: { kind: 'image', images: [IMG] } })).json();
+  assert.match(r2.text, /sobrecarregado/);
 });
 
 test('remover o Groq mantém a chave do Gemini', async () => {

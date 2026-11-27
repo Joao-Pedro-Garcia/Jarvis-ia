@@ -49,20 +49,25 @@ export async function listModels(k = key()) {
   return (data?.models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')).map((m) => String(m.name).replace(/^models\//, ''));
 }
 
-/** Prefere o "flash" estável mais novo (rápido e com cota grátis maior). */
-export function pickModel(ids, wanted = process.env.GEMINI_MODEL) {
-  if (wanted && ids.includes(wanted)) return wanted;
+/** Modelos em ordem de preferência: flash estável mais novo → outros flash → flash-lite → resto. */
+export function rankModels(ids) {
   const ver = (id) => Number((id.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
-  const bad = /tts|image|live|audio|embed|thinking|exp|preview|learnlm|veo|imagen/i;
+  const bad = /tts|image|live|audio|embed|thinking|exp|preview|learnlm|veo|imagen|robotics|computer/i;
   const byVer = (a, b) => ver(b) - ver(a);
   const tiers = [
     ids.filter((m) => /^gemini-[\d.]+-flash$/.test(m)),
+    ids.filter((m) => /^gemini-flash-latest$/.test(m)),
     ids.filter((m) => /flash/.test(m) && !/lite/.test(m) && !bad.test(m)),
     ids.filter((m) => /flash-lite/.test(m) && !bad.test(m)),
     ids.filter((m) => /^gemini/.test(m) && !bad.test(m)),
   ];
-  for (const t of tiers) if (t.length) return t.sort(byVer)[0];
-  return null;
+  const out = [];
+  for (const t of tiers) for (const m of t.sort(byVer)) if (!out.includes(m)) out.push(m);
+  return out;
+}
+export function pickModel(ids, wanted = process.env.GEMINI_MODEL) {
+  if (wanted && ids.includes(wanted)) return wanted;
+  return rankModels(ids)[0] || null;
 }
 
 export async function saveKey(k) {
@@ -85,7 +90,8 @@ export function friendlyError(err) {
   if (err.status === 401 || err.status === 403) return 'chave do Gemini inválida ou sem permissão';
   if (err.status === 429) return 'limite gratuito do Gemini atingido por agora';
   if (err.status === 404) return 'modelo do Gemini indisponível';
-  if (err.status >= 500) return 'o Gemini está fora do ar agora';
+  if (err.status === 503 || /overload|unavailable/i.test(err.message)) return 'o Gemini está sobrecarregado agora (tente de novo em alguns segundos)';
+  if (err.status >= 500) return `o Gemini deu erro do lado do Google (${String(err.message).slice(0, 90)})`;
   if (err instanceof TypeError || /fetch failed/.test(err.message)) return 'sem internet para a visão';
   return err.message;
 }
@@ -106,11 +112,26 @@ export async function seeImages({ system, history = [], text, images, maxTokens 
     if (!out) throw Object.assign(new Error(data?.promptFeedback?.blockReason ? 'o Gemini recusou analisar essa imagem' : 'resposta vazia do Gemini'), { status: 422 });
     return { text: out, model: m };
   };
-  try { return await run(model()); } catch (err) {
-    if (err.status === 404) { // modelo retirado: escolhe outro e tenta de novo
-      const next = pickModel(await listModels().catch(() => []), null);
-      if (next && next !== model()) { chosen = next; const d = load(FILE, {}); if (d.gemini) { d.gemini.model = next; save(FILE, d); } return run(next); }
+  // Tenta o modelo escolhido e, se o Google estiver sobrecarregado/com erro ou tiver retirado
+  // o modelo, tenta outros modelos da conta (até 4) — no plano grátis isso é comum.
+  let lastErr;
+  const tried = new Set();
+  let list = [model()];
+  for (let i = 0; i < list.length && tried.size < 4; i++) {
+    const m = list[i];
+    if (tried.has(m)) continue;
+    tried.add(m);
+    try {
+      const out = await run(m);
+      if (m !== model()) { chosen = m; const d = load(FILE, {}); if (d.gemini) { d.gemini.model = m; save(FILE, d); } }
+      return out;
+    } catch (err) {
+      lastErr = err;
+      const retryable = err.status === 404 || err.status === 429 || err.status >= 500 || err.status === 0;
+      if (!retryable) throw err;
+      if (err.status === 503 && tried.size === 1) { await new Promise((r) => setTimeout(r, 1200)); try { return await run(m); } catch (e2) { lastErr = e2; } }
+      if (list.length === 1) list = [m, ...rankModels(await listModels().catch(() => [])).filter((x) => x !== m)];
     }
-    throw err;
   }
+  throw lastErr;
 }
