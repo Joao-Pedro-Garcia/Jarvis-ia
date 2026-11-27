@@ -377,6 +377,7 @@ bus.on(EVENTS.CLAP_DETECTED, () => core?.pulse(0.3));
 // PALMS_DETECTED: duas palmas reconhecidas → "Sim?" → ouvir → cérebro → resposta.
 bus.on(EVENTS.PALMS_DETECTED, (evt) => {
   if (evt?.test) return; // teste do diagnóstico: não inicia conversa
+  if (currentSheet() === 'selftest') return; // auto-diagnóstico usando o microfone: palmas não abrem escuta no meio
   if (asleep) { wakeUp('duas palmas'); greetOnWake(); return; }
   if (isSpeaking() || isPaused()) { stopAll('duas palmas'); addMsg('system', '👏👏 Fala interrompida'); return; }
   if (busy || isListening()) return;

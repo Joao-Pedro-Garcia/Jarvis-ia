@@ -101,6 +101,38 @@ export function configureClap(settings) { detector.configure(settings || {}); }
 export function setClapStrict(on) { detector.configure({ strict: !!on }); clientLog('palmas', on ? 'Detecção rigorosa (dormindo)' : 'Detecção normal'); }
 
 /**
+ * CALIBRAÇÃO: você bate palmas algumas vezes e o JARVIS mede a força típica das SUAS
+ * palmas. Depois, dormindo, ele exige palmas parecidas com essas (barulhos fracos não
+ * acordam, e palmas de verdade não são recusadas). Devolve { ok, peak, count }.
+ */
+export async function calibrateClaps(settings, { ms = 15000, want = 6, onClap } = {}) {
+  const wasRunning = !!stream && !paused;
+  const wasEnabled = enabled;
+  const prev = { ...detector.o };
+  testing = true;
+  const peaks = [];
+  const off = bus.on(EVENTS.CLAP_DETECTED, (ev) => { peaks.push(ev.peak); onClap?.(peaks.length, want); });
+  try {
+    if (!wasRunning) await startClap(settings);
+    else if (paused) paused = false;
+    if (ctx?.state === 'suspended') { try { await ctx.resume(); } catch {} }
+    detector.configure({ strict: false, sensitivity: 1, thresholdOverride: 0, calibratedPeak: 0 });
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms && peaks.length < want) await new Promise((r) => setTimeout(r, 100));
+  } finally {
+    off();
+    detector.configure(prev);
+    testing = false;
+    if (!wasRunning) await stopClap(wasEnabled);
+  }
+  if (peaks.length < 3) return { ok: false, count: peaks.length };
+  const top = [...peaks].sort((a, b) => b - a).slice(0, want);
+  const peak = top[Math.floor(top.length / 2)];
+  clientLog('palmas', `Calibração: ${peaks.length} palmas, pico típico ${peak.toFixed(3)}`);
+  return { ok: true, peak: Math.round(peak * 1000) / 1000, count: peaks.length };
+}
+
+/**
  * TESTE REAL das palmas (diagnóstico): liga o detector se preciso, espera até
  * `ms` por duas palmas e devolve o que aconteceu. Não dispara a conversa.
  */

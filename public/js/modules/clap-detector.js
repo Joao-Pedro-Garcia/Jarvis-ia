@@ -25,8 +25,11 @@ export const DEFAULTS = {
   // Modo RIGOROSO (JARVIS dormindo): só acorda com duas palmas fortes e nítidas em
   // ambiente calmo — barulhos de casa, fala, TV, portas e batidas não acordam.
   strict: false,
+  // Pico típico das SUAS palmas, medido na calibração (0 = não calibrado).
+  calibratedPeak: 0,
 };
-const STRICT = { thr: 1.8, attackRatio: 5, hfMin: 0.3, maxClapMs: 80, similar: 2.2, minGapMs: 150, maxGapMs: 650, quietBefore: 3 };
+// Rigor do modo dormindo (afrouxado: o anterior recusava palmas de verdade).
+const STRICT = { thr: 1.4, attackRatio: 4.2, hfMin: 0.24, maxClapMs: 95, similar: 2.5, minGapMs: 130, maxGapMs: 700, quietBefore: 5 };
 
 export class ClapDetector {
   constructor(opts = {}) {
@@ -46,10 +49,16 @@ export class ClapDetector {
     const s = Math.min(1, Math.max(0, this.o.sensitivity));
     this.ratio = 16 - s * 11; // 16× (pouco sensível) … 5× (muito sensível) acima do piso
     // Limiar manual (0 = automático pela sensibilidade). Pico mínimo na escala 0..1.
-    this.absMin = this.o.thresholdOverride > 0 ? this.o.thresholdOverride : 0.22 - s * 0.17;
+    const cal = this.o.calibratedPeak > 0 ? this.o.calibratedPeak : 0;
+    this.absMin = this.o.thresholdOverride > 0 ? this.o.thresholdOverride : cal ? Math.max(0.02, cal * 0.35) : 0.22 - s * 0.17;
   }
 
-  threshold() { return Math.max(this.absMin, this.floor * this.ratio * 2.2) * (this.o.strict ? STRICT.thr : 1); }
+  threshold() {
+    const base = Math.max(this.absMin, this.floor * this.ratio * 2.2);
+    if (!this.o.strict) return base;
+    // Dormindo: calibrado → metade da força das SUAS palmas; senão, o limiar normal × 1,4.
+    return this.o.calibratedPeak > 0 ? Math.max(base, this.o.calibratedPeak * 0.5) : base * STRICT.thr;
+  }
 
   /** Processa um quadro. Retorna eventos: {type:'clap'|'double'|'reject', ...} */
   process({ rms, peak, hf = 0.5, t }) {

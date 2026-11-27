@@ -147,6 +147,9 @@ export async function showSettings({ onChange } = {}) {
       </fieldset>
       <fieldset class="fieldset"><legend>PALMAS</legend>
         <label class="switch">Ativar com duas palmas <input type="checkbox" data-k="clap.enabled" ${s.clap.enabled ? 'checked' : ''}></label>
+        <div class="field"><button class="btn small" id="clap-cal" type="button">🎯 Calibrar com as minhas palmas</button>
+          ${s.clap.calibratedPeak > 0 ? '<button class="btn small" id="clap-cal-reset" type="button">Voltar ao automático</button>' : ''}
+          <p class="hint" id="clap-cal-state">${s.clap.calibratedPeak > 0 ? '🟢 Calibrado com as suas palmas.' : '⚪ Não calibrado: toque em Calibrar, fique onde costuma ficar e bata DUAS palmas, três vezes.'}</p></div>
         <div class="field"><label>Sensibilidade: <span data-out="clap.sensitivity">${s.clap.sensitivity}</span></label><input type="range" min="0" max="1" step="0.05" value="${s.clap.sensitivity}" data-k="clap.sensitivity" data-num></div>
         <div class="field"><label>Intervalo mínimo entre palmas (ms): <span data-out="clap.minGapMs">${s.clap.minGapMs}</span></label><input type="range" min="60" max="400" step="10" value="${s.clap.minGapMs}" data-k="clap.minGapMs" data-num></div>
         <div class="field"><label>Volume mínimo da palma (limiar manual, 0 = automático): <span data-out="clap.thresholdOverride">${s.clap.thresholdOverride}</span></label><input type="range" min="0" max="0.6" step="0.01" value="${s.clap.thresholdOverride}" data-k="clap.thresholdOverride" data-num></div>
@@ -208,6 +211,21 @@ export async function showSettings({ onChange } = {}) {
       });
     });
     $('#test-voice', body).addEventListener('click', () => onChange?.(getSettings(), 'test-voice'));
+    // Calibração das palmas
+    $('#clap-cal', body)?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; const st = $('#clap-cal-state', body);
+      btn.disabled = true;
+      st.textContent = '👏 Agora: bata DUAS palmas, espere um segundo, e repita mais duas vezes (15 s)…';
+      try {
+        const { calibrateClaps } = await import('../modules/clap.js');
+        const r = await calibrateClaps(getSettings().clap, { onClap: (n, want) => { st.textContent = `👏 ${n} de ${want} palmas ouvidas…`; } });
+        if (!r.ok) { st.textContent = `⚠ Ouvi só ${r.count} palma(s). Chegue mais perto, bata mais forte e tente de novo.`; return; }
+        const n = await saveSettings({ clap: { calibratedPeak: r.peak, enabled: true } });
+        onChange?.(n, 'clap.enabled');
+        st.textContent = '🟢 Calibrado com as suas palmas! Dormindo, ele vai acordar com palmas parecidas com essas.';
+      } catch (err) { st.textContent = `⚠ ${err.message}`; } finally { btn.disabled = false; }
+    });
+    $('#clap-cal-reset', body)?.addEventListener('click', async () => { const n = await saveSettings({ clap: { calibratedPeak: 0 } }); onChange?.(n, 'clap.enabled'); $('#clap-cal-state', body).textContent = '⚪ Voltou ao automático.'; });
     // Backup
     const fmtKb = (b) => `${Math.max(1, Math.round(b / 1024))} KB`;
     const loadBackups = async () => {

@@ -111,7 +111,7 @@ test('rigoroso (dormindo): duas palmas fortes e nítidas acordam', () => {
   assert.equal(doubles(run(timeline(2500, [clap(800, 0.7), clap(1150, 0.7)]), strict)), 1);
 });
 test('rigoroso: palmas fracas/distantes, que acordariam no modo normal, não acordam', () => {
-  const sounds = [clap(800, 0.19), clap(1100, 0.19)];
+  const sounds = [clap(800, 0.2), clap(1100, 0.2)];
   assert.equal(doubles(run(timeline(2500, sounds))), 1, 'modo normal aceita');
   assert.equal(doubles(run(timeline(2500, sounds), strict)), 0, 'dormindo recusa');
 });
@@ -120,8 +120,20 @@ test('rigoroso: batidas de porta/mesa e fala não acordam', () => {
   assert.equal(doubles(run(timeline(3000, [{ kind: 'speech', at: 500, amp: 0.5, dur: 900 }, clap(1500, 0.7)]), strict)), 0);
 });
 test('rigoroso: estalos com intensidades bem diferentes não acordam', () => {
-  assert.equal(doubles(run(timeline(2500, [clap(800, 0.9), clap(1100, 0.35)])), { ...strict }), 0);
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.9), clap(1100, 0.3)]), { ...strict })), 0);
 });
 test('rigoroso: ambiente barulhento (TV/música alta) não acorda com estalos no meio', () => {
   assert.equal(doubles(run(timeline(3000, [clap(1200, 0.7), clap(1500, 0.7)], { noise: 0.06 }), strict)), 0);
+});
+
+// ---------- Calibração com as palmas do usuário ----------
+test('calibrado: dormindo, palmas parecidas com as calibradas acordam; barulhos bem mais fracos não', () => {
+  const cal = { strict: true, calibratedPeak: 0.5 };
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.45), clap(1100, 0.5)]), cal)), 1);
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.2), clap(1100, 0.2)]), cal)), 0);
+});
+test('calibrado com palmas fracas (pessoa longe do celular): dormindo, acorda com elas', () => {
+  const cal = { strict: true, calibratedPeak: 0.12 };
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.12), clap(1100, 0.12)]), cal)), 1);
+  assert.equal(doubles(run(timeline(2500, [clap(800, 0.12), clap(1100, 0.12)]), { strict: true })), 0, 'sem calibrar, recusaria');
 });
