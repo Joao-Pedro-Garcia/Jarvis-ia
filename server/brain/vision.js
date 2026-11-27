@@ -3,6 +3,7 @@
 // Vídeo: o navegador tira alguns quadros e o Whisper transcreve o áudio; o modelo vê os
 // quadros em ordem + a transcrição. Só com o Groq conectado (a IA do celular não enxerga).
 import * as groq from './ai/groq.js';
+import * as gemini from './ai/gemini.js';
 import { getPersonality } from './personality.js';
 import * as memory from '../modules/memory/memory.js';
 import { log } from '../core/logger.js';
@@ -24,10 +25,14 @@ export function cleanMedia(m) {
 export const mediaLabel = (m) => (m.kind === 'video' ? `🎬 vídeo${m.duration ? ` de ${m.duration} s` : ''}` : `📷 ${m.count > 1 ? `${m.count} imagens` : 'imagem'}`);
 
 /** Responde sobre a mídia. Devolve { text, source } — nunca inventa: sem Groq, explica. */
+export const GEMINI_HELP = 'Para eu enxergar imagens de graça, conecte o Google Gemini: Configurações → INTELIGÊNCIA → VISÃO (Gemini) — é grátis e sem cartão.';
+
+/** Responde sobre a mídia. Tenta o Groq (se a conta tiver visão) e depois o Gemini. Nunca inventa. */
 export async function answer(text, media, sess) {
-  if (!groq.groqProvider.configured()) {
-    return { text: 'Para eu entender imagens e vídeos, conecte o Groq em Configurações → INTELIGÊNCIA (é grátis). A IA do celular não consegue enxergar imagens.', source: 'local', ok: false };
-  }
+  const providers = [];
+  if (groq.groqProvider.configured()) providers.push({ id: 'groq', name: 'Groq', see: groq.seeImages, friendly: (e) => (e.code === 'NO_VISION' ? e.message : groq.groqProvider.friendlyError(e)) });
+  if (gemini.configured()) providers.push({ id: 'gemini', name: 'Gemini', see: gemini.seeImages, friendly: gemini.friendlyError });
+  if (!providers.length) return { text: `Ainda não consigo enxergar imagens. ${GEMINI_HELP}`, source: 'local', ok: false };
   const p = getPersonality();
   const mem = memory.contextSnippet(20);
   const system = [
@@ -49,14 +54,21 @@ export async function answer(text, media, sess) {
   if (history.length && history[history.length - 1].role === 'user') history.pop();
   const ask = text || (media.kind === 'video' ? 'Do que se trata este vídeo?' : 'O que você vê aqui?');
   const prompt = media.kind === 'video' && media.transcript ? `${ask}\n\nTranscrição do áudio do vídeo:\n"""${media.transcript}"""` : ask;
-  try {
-    const t0 = Date.now();
-    const out = await groq.seeImages({ system, history, text: prompt, images: media.images });
-    log.info('cerebro', `Visão: ${media.images.length} imagem(ns) em ${Date.now() - t0} ms`);
-    return { text: out.text, source: `IA ONLINE: Groq (${out.model}) · visão`, ok: true };
-  } catch (err) {
-    const msg = err.code === 'NO_VISION' ? err.message : groq.groqProvider.friendlyError(err);
-    log.warn('cerebro', `Visão falhou: ${msg}`);
-    return { text: `Não consegui analisar ${media.kind === 'video' ? 'o vídeo' : 'a imagem'} agora (${msg}).`, source: 'erro', ok: false };
+  const errors = [];
+  for (const pv of providers) {
+    try {
+      const t0 = Date.now();
+      const out = await pv.see({ system, history, text: prompt, images: media.images });
+      log.info('cerebro', `Visão (${pv.name}): ${media.images.length} imagem(ns) em ${Date.now() - t0} ms`);
+      return { text: out.text, source: `IA ONLINE: ${pv.name} (${out.model}) · visão`, ok: true };
+    } catch (err) {
+      const msg = pv.friendly(err);
+      errors.push({ id: pv.id, msg, noVision: err.code === 'NO_VISION' });
+      log.warn('cerebro', `Visão pelo ${pv.name} falhou: ${msg}`);
+    }
   }
+  const onlyGroqWithoutVision = errors.length === 1 && errors[0].noVision;
+  const what = media.kind === 'video' ? 'o vídeo' : 'a imagem';
+  if (onlyGroqWithoutVision) return { text: `A sua conta do Groq não tem modelo que enxerga imagens. ${GEMINI_HELP}`, source: 'erro', ok: false };
+  return { text: `Não consegui analisar ${what} agora (${errors.map((e) => e.msg).join('; ')}).`, source: 'erro', ok: false };
 }

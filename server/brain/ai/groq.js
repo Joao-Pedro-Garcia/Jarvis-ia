@@ -55,12 +55,13 @@ export async function saveKey(k) {
   try { ids = await listModels(clean); } catch (err) { throw Object.assign(new Error(groqProvider.friendlyError(err)), { status: err.status === 401 || err.status === 403 ? 400 : 502 }); }
   const model = pickModel(ids);
   if (!model) throw Object.assign(new Error('A conta do Groq não tem nenhum modelo de conversa disponível.'), { status: 502 });
-  save(FILE, { groq: { key: encrypt(clean), model, savedAt: new Date().toISOString() } });
+  save(FILE, { ...load(FILE, {}), groq: { key: encrypt(clean), model, savedAt: new Date().toISOString() } }); // mantém a chave do Gemini
   chosen = model;
+  visionIds = null; // conta nova: procura de novo os modelos de visão
   return { model, models: ids.length };
 }
 
-export function removeKey() { save(FILE, {}); chosen = null; searchIds = null; }
+export function removeKey() { const d = load(FILE, {}); delete d.groq; save(FILE, d); chosen = null; searchIds = null; visionIds = null; }
 
 // ---------- Pesquisa na internet (modelos "compound" do Groq) ----------
 export const SEARCH_MODELS = () => [...new Set([process.env.GROQ_SEARCH_MODEL, 'groq/compound-mini', 'groq/compound', 'compound-beta-mini', 'compound-beta'].filter(Boolean))];
@@ -181,13 +182,42 @@ export async function transcribe(buf, mime = 'audio/webm', { language = 'pt', ti
 export const VISION_MODELS = () => [...new Set([process.env.GROQ_VISION_MODEL, 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean))];
 let visionIds = null;
 let visionAt = 0;
-async function visionCandidates() {
-  if (visionIds === null || Date.now() - visionAt > 6 * 3600e3) {
-    try { const ids = await listModels(key(), 5000); visionIds = VISION_MODELS().filter((m) => ids.includes(m)); visionAt = Date.now(); } catch { return VISION_MODELS(); }
-  }
-  return visionIds.length ? visionIds : [];
+// Nomes que costumam indicar modelo que enxerga imagens (o Groq troca modelos com o tempo).
+const LOOKS_VISION = /(vision|llama-4|scout|maverick|[-_/]vl\b|\bvl[-_]|pixtral|llava|gemma-?3|qwen[\w.-]*vl|multimodal|omni)/i;
+const NOT_TEXT = /whisper|guard|tts|playai|orpheus|embed|compound|allam|distil/i;
+const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+/** Testa de verdade se o modelo aceita imagem (1 pixel, 3 tokens). */
+async function acceptsImages(model) {
+  try {
+    await chatCompletion({ endpoint: `${GROQ_BASE}/chat/completions`, key: key(), model, system: 'Responda apenas: ok', messages: [{ role: 'user', content: [{ type: 'text', text: 'ok?' }, { type: 'image_url', image_url: { url: TINY_PNG } }] }], maxTokens: 3, timeoutMs: 15000 });
+    return true;
+  } catch { return false; }
 }
-export const resetVision = () => { visionIds = null; };
+/**
+ * Modelos da SUA conta que enxergam imagens: primeiro os conhecidos, depois os que têm
+ * nome de modelo de visão e, se nenhum, testa até 4 modelos de conversa com uma imagem
+ * de 1 pixel. O resultado fica guardado por 24 h (não gasta o limite à toa).
+ */
+async function visionCandidates() {
+  if (visionIds === null) { const saved = load(FILE, {}).groq?.vision; if (saved && Date.now() - saved.at < 24 * 3600e3) { visionIds = saved.ids; visionAt = saved.at; } }
+  if (visionIds !== null && Date.now() - visionAt < 24 * 3600e3) return visionIds;
+  let ids;
+  try { ids = await listModels(key(), 8000); } catch { return VISION_MODELS(); }
+  const known = VISION_MODELS().filter((m) => ids.includes(m));
+  const guessed = ids.filter((m) => !known.includes(m) && LOOKS_VISION.test(m) && !NOT_TEXT.test(m));
+  const found = [];
+  for (const m of [...known, ...guessed].slice(0, 4)) if (await acceptsImages(m)) found.push(m);
+  if (!found.length) {
+    for (const m of ids.filter((x) => !NOT_TEXT.test(x) && !guessed.includes(x) && !known.includes(x)).slice(0, 4)) {
+      if (await acceptsImages(m)) { found.push(m); break; }
+    }
+  }
+  visionIds = found; visionAt = Date.now();
+  const d = load(FILE, {});
+  if (d.groq) { d.groq.vision = { ids: found, at: visionAt }; save(FILE, d); }
+  return found;
+}
+export const resetVision = () => { visionIds = null; visionAt = 0; const d = load(FILE, {}); if (d.groq?.vision) { delete d.groq.vision; save(FILE, d); } };
 
 /**
  * Responde sobre imagens. `images` = data URLs (jpeg/png/webp), no máximo 5.

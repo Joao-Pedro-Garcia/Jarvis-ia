@@ -86,9 +86,9 @@ export async function showMemory(sessionHistory = []) {
 
 // ---------------- CONFIGURAÇÕES ----------------
 export async function showSettings({ onChange } = {}) {
-  const [s, personality, bible, booksRes, status, online, ttsInfo] = await Promise.all([
+  const [s, personality, bible, booksRes, status, online, ttsInfo, gem] = await Promise.all([
     Promise.resolve(getSettings()), api.get('/api/personality').catch(() => null), api.get('/api/bible/settings').catch(() => null), api.get('/api/bible/books').catch(() => ({ books: [] })), api.get('/api/status').catch(() => null),
-    api.get('/api/ai/online').catch(() => null), api.get('/api/tts').catch(() => null),
+    api.get('/api/ai/online').catch(() => null), api.get('/api/tts').catch(() => null), api.get('/api/ai/gemini').catch(() => null),
   ]);
   const aiStatus = status?.llm;
   openSheet('settings', 'CONFIGURAÇÕES', (body) => {
@@ -108,6 +108,17 @@ export async function showSettings({ onChange } = {}) {
         <p class="hint" id="groq-state">${online?.configured ? `🟢 Groq conectado · modelo <b>${esc(online.model)}</b>${online.source === 'env' ? ' (chave definida no .env do servidor)' : ''}` : '⚪ Groq não conectado.'}</p>
         ${online?.configured && online.source === 'saved' ? '<button class="btn small" id="groq-remove" type="button">Remover chave do Groq</button>' : ''}
         <p class="hint">A chave fica só no seu aparelho, criptografada, e nunca aparece de novo na tela. Com o Groq, as perguntas feitas à IA passam pelos servidores do Groq. Comandos, memória, Bíblia e tarefas continuam no aparelho. Sem internet ou no limite grátis, a IA do celular responde no lugar.</p>
+        <h4 class="h4">VISÃO (IMAGENS E VÍDEOS) — GOOGLE GEMINI</h4>
+        <p class="hint">Grátis e sem cartão. Use se o Groq disser que não enxerga imagens.</p>
+        <ol class="hint groq-steps">
+          <li>No Chrome, abra <b>aistudio.google.com</b> e entre com sua conta Google (aceite os termos, se pedir).</li>
+          <li>Toque em <b>Get API key</b> (ou “Criar chave de API”) → <b>Create API key</b> e <b>copie a chave</b> (começa com AIza).</li>
+          <li>Cole abaixo e toque em <b>Salvar e testar</b>.</li>
+        </ol>
+        <div class="groq-row"><input id="gem-key" class="inline-input" type="password" placeholder="Cole aqui a chave do Gemini" autocomplete="off" spellcheck="false" aria-label="Chave do Gemini"><button class="btn small" id="gem-save" type="button">Salvar e testar</button></div>
+        <p class="hint" id="gem-state">${gem?.configured ? `🟢 Gemini conectado · modelo <b>${esc(gem.model)}</b>` : '⚪ Gemini não conectado.'}</p>
+        ${gem?.configured && gem.source === 'saved' ? '<button class="btn small" id="gem-remove" type="button">Remover chave do Gemini</button>' : ''}
+        <p class="hint">As imagens que você enviar passam pelos servidores do Google para serem analisadas.</p>
       </fieldset>
       <fieldset class="fieldset"><legend>VOZ</legend>
         <label class="switch">Responder por voz <input type="checkbox" data-k="voice.enabled" ${s.voice.enabled ? 'checked' : ''}></label>
@@ -211,6 +222,15 @@ export async function showSettings({ onChange } = {}) {
       });
     });
     $('#test-voice', body).addEventListener('click', () => onChange?.(getSettings(), 'test-voice'));
+    // Chave do Gemini (visão)
+    $('#gem-save', body)?.addEventListener('click', async () => {
+      const inp = $('#gem-key', body); const st = $('#gem-state', body);
+      const key = inp.value.trim();
+      if (!key) { st.textContent = '⚠ Cole a chave primeiro.'; return; }
+      st.textContent = '⏳ Testando a chave no Gemini…';
+      try { const r = await api.post('/api/ai/gemini', { key }); inp.value = ''; st.innerHTML = `🟢 Gemini conectado · modelo <b>${esc(r.model)}</b>. Agora é só mandar a imagem pelo 📎.`; } catch (err) { st.textContent = `🔴 ${err.message}`; }
+    });
+    if ($('#gem-remove', body)) confirmButton($('#gem-remove', body), async () => { await api.del('/api/ai/gemini?confirm=true'); $('#gem-state', body).textContent = '⚪ Gemini removido.'; }, 'Remover? Toque de novo');
     // Calibração das palmas
     $('#clap-cal', body)?.addEventListener('click', async (e) => {
       const btn = e.currentTarget; const st = $('#clap-cal-state', body);

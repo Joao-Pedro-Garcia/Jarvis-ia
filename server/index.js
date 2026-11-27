@@ -24,6 +24,7 @@ const tasks = await import('./modules/tasks/tasks.js');
 const selftest = await import('./core/selftest.js');
 const chats = await import('./core/chats.js');
 const groq = await import('./brain/ai/groq.js');
+const gemini = await import('./brain/ai/gemini.js');
 const backups = await import('./core/auto-backup.js');
 const tts = await import('./modules/voice/tts.js');
 const vision = await import('./brain/vision.js');
@@ -277,6 +278,18 @@ async function api(req, res, url) {
         log.info('cerebro', `IA online (Groq) configurada · modelo ${r.model}`);
         return send(res, 200, { ok: true, model: r.model, status: await llm.refresh({ force: true }) });
       } catch (err) { return send(res, err.status || 400, { error: err.message }); }
+    }
+    // Visão gratuita de reserva (Google Gemini): mesma lógica da chave do Groq.
+    case 'GET /api/ai/gemini': return send(res, 200, { configured: gemini.configured(), source: gemini.keySource(), model: gemini.configured() ? gemini.model() : null });
+    case 'POST /api/ai/gemini': {
+      if (rateLimited(ip, 'ai-key', 10)) return send(res, 429, { error: 'Muitas tentativas. Aguarde um instante.' });
+      const body = await readBody(req);
+      try { const r = await gemini.saveKey(body.key); log.info('cerebro', `Visão (Gemini) configurada · modelo ${r.model}`); return send(res, 200, { ok: true, model: r.model }); } catch (err) { return send(res, err.status || 400, { error: err.message }); }
+    }
+    case 'DELETE /api/ai/gemini': {
+      if (url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });
+      gemini.removeKey();
+      return send(res, 200, { ok: true });
     }
     case 'DELETE /api/ai/online': {
       if (url.searchParams.get('confirm') !== 'true') return send(res, 400, { error: 'Confirmação necessária' });

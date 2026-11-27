@@ -308,9 +308,12 @@ try {
     } finally { await ctx.setOffline(false); }
     await page.fill('#command-input', 'que dia é hoje?'); await page.press('#command-input', 'Enter');
     await page.waitForFunction(() => document.getElementById('banner').hidden, null, { timeout: 15000 });
+    // espera a resposta terminar (senão o próximo comando chega com o JARVIS ocupado e é ignorado)
+    await page.waitForFunction(() => /Hoje é/.test(document.getElementById('transcript').textContent) && document.body.dataset.state !== 'thinking', null, { timeout: 15000 });
   });
   await step('25. "Faça um diagnóstico" → testes reais → "Diagnóstico concluído"', async () => {
-    await say(page, 'JARVIS, faça um diagnóstico');
+    // digitado: as palmas gravadas do teste (a cada 6 s) disputam o microfone simulado e deixavam esta etapa instável
+    await page.fill('#command-input', 'JARVIS, faça um diagnóstico'); await page.press('#command-input', 'Enter');
     await page.waitForFunction(() => /Diagnóstico concluído/.test(document.getElementById('selftest-sum')?.textContent || ''), null, { timeout: 120000 })
       .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} · tabela: ${(await page.evaluate(() => document.querySelector('.diag-table')?.textContent || document.getElementById('transcript')?.textContent.slice(-300) || '')).replace(/\s+/g, ' ').slice(0, 400)}`); });
     const sum = await page.textContent('#selftest-sum');
