@@ -12,6 +12,7 @@ import { resetJarvisVoice, speak, stopSpeaking, configureVoice, unlockVoice, isS
 import { sounds } from './modules/sounds.js';
 import { wake } from './modules/wake/index.js';
 import { setClapStrict } from './modules/clap.js';
+import * as attach from './modules/attach.js';
 import { initMicState, micStatus, setMicState, MIC_LABEL, notify, notificationState, setKeepAwake } from './modules/device.js';
 import { createCore } from './ui/core-viz.js';
 import { $, $$, esc, toast, relTime } from './ui/dom.js';
@@ -182,17 +183,22 @@ async function greetOnWake() {
   if (!asleep && !busy && !isListening()) startListening({ chime: true, quiet: 'silence' });
 }
 
-async function handleInput(text, source = 'text') {
+async function handleInput(text, source = 'text', { media = null } = {}) {
   text = String(text || '').trim();
-  if (!text) { setState('standby'); return; }
+  if (!text && !media) { setState('standby'); return; }
   if (busy) { toast('Aguarde, ainda estou processando…'); return; }
   const low = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (SLEEP_RE.test(low)) { if (!asleep) sleepNow(); else addMsg('system', 'Já estou dormindo. Bata duas palmas ou diga “Jarvis”.', 'SISTEMA'); return; }
+  if (!media && SLEEP_RE.test(low)) { if (!asleep) sleepNow(); else addMsg('system', 'Já estou dormindo. Bata duas palmas ou diga “Jarvis”.', 'SISTEMA'); return; }
   if (asleep) { wakeUp('comando de voz'); }
   busy = true;
   stopAll('nova pergunta');
-  addMsg('user', text);
-  setState('thinking');
+  addMsg('user', text || (media ? (media.kind === 'video' ? '🎬 Vídeo' : media.count > 1 ? `📷 ${media.count} imagens` : '📷 Imagem') : ''));
+  if (media) { // miniaturas do que foi enviado, no próprio balão
+    const p = $('#transcript').lastElementChild; const th = document.createElement('div'); th.className = 'thumbs';
+    for (const src of media.images.slice(0, 5)) { const im = document.createElement('img'); im.src = src; im.alt = ''; th.appendChild(im); }
+    p?.appendChild(th);
+  }
+  setState('thinking', media ? (media.kind === 'video' ? 'ASSISTINDO' : 'OLHANDO') : undefined);
   const t0 = performance.now();
   let res;
   // Balão da resposta sendo escrita (IA local manda a resposta palavra por palavra).
@@ -208,7 +214,8 @@ async function handleInput(text, source = 'text') {
   };
   try {
     const payload = { text, sessionId, chatId, pageSize: pageSize(), source, client: clientInfo() };
-    try { res = await api.postStream('/api/input/stream', payload, onToken); }
+    if (media) res = await api.post('/api/input/media', { ...payload, media }, { timeout: 120000 });
+    else try { res = await api.postStream('/api/input/stream', payload, onToken); }
     catch (err) { if (err.status === 404 || err.status === 405) res = await api.post('/api/input', payload, { timeout: 90000 }); else throw err; }
     if (res?.chatId && res.chatId !== chatId) setChat(res.chatId);
     if (!$('#drawer').hidden) renderChats();
@@ -340,7 +347,8 @@ async function startListening({ chime = true, greet = null, quiet = false, manua
     if (isEcho(text)) { clientLog('ouvido', 'Transcrição descartada: era a própria voz do JARVIS'); setState('standby'); return; }
     clientLog('ouvido', `Transcrição recebida (${text.length} caracteres)`);
     bus.emit(EVENTS.VOICE_RECEIVED, { text });
-    await handleInput(text, 'voice');
+    if (attached.length) await sendWithMedia(text); // falou a pergunta sobre o anexo
+    else await handleInput(text, 'voice');
   } catch (err) {
     $('#interim').textContent = '';
     setState('error', 'MICROFONE');
@@ -499,10 +507,51 @@ function applySettings(s, changedKey) {
 function openSettings() { showSettings({ onChange: (s, key) => applySettings(s, key) }); }
 
 // ============================================================ eventos de interface
+// ---- Anexos: 📎 imagem(ns) ou vídeo para o JARVIS analisar ----
+let attached = [];
+function renderAttach() {
+  const box = $('#attach-preview');
+  box.hidden = !attached.length;
+  box.replaceChildren(...attached.map((a, i) => {
+    const d = document.createElement('div'); d.className = 'att';
+    const el = document.createElement(a.kind === 'video' ? 'video' : 'img');
+    el.src = a.url; if (a.kind === 'video') { el.muted = true; el.playsInline = true; }
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Remover anexo');
+    x.addEventListener('click', () => { URL.revokeObjectURL(a.url); attached.splice(i, 1); renderAttach(); });
+    const k = document.createElement('span'); k.className = 'kind'; k.textContent = a.kind === 'video' ? '🎬' : '📷';
+    d.append(el, k, x); return d;
+  }));
+  $('#command-input').placeholder = attached.length ? 'Pergunte algo sobre o anexo (ou só envie) ➤' : 'Fale ou digite um comando…  ( / para digitar · espaço para falar )';
+}
+function clearAttach() { for (const a of attached) URL.revokeObjectURL(a.url); attached = []; renderAttach(); }
+$('#attach-btn').addEventListener('click', () => $('#attach-input').click());
+$('#attach-input').addEventListener('change', (e) => {
+  const { items, note } = attach.classify(e.target.files, attached);
+  for (const a of attached) if (!items.includes(a)) URL.revokeObjectURL(a.url);
+  attached = items.map((it) => (it.url ? it : { ...it, url: URL.createObjectURL(it.file) }));
+  if (note) toast(note);
+  e.target.value = '';
+  renderAttach();
+  $('#command-input').focus();
+});
+async function sendWithMedia(text) {
+  if (busy) { toast('Aguarde, ainda estou processando…'); return; }
+  const items = attached; attached = []; renderAttach();
+  let media;
+  try {
+    setState('thinking', 'PREPARANDO');
+    media = await attach.prepare(items, (step) => { $('#interim').textContent = step; });
+  } catch (err) { setState('standby'); toast(err.message); return; }
+  finally { $('#interim').textContent = ''; for (const a of items) URL.revokeObjectURL(a.url); }
+  if (media.kind === 'video' && !media.transcript) clientLog('interface', 'Vídeo sem áudio transcrito (sem áudio, grande demais ou formato .mov)');
+  return handleInput(text, 'text', { media });
+}
+
 $('#command-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('#command-input');
   const v = input.value; input.value = '';
+  if (attached.length) { sendWithMedia(v); return; }
   handleInput(v, 'text');
 });
 for (const id of ['#mic-btn', '#dock-mic', '#sheet-mic']) $(id).addEventListener('click', () => startListening({ manual: true }));

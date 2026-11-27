@@ -26,6 +26,7 @@ const chats = await import('./core/chats.js');
 const groq = await import('./brain/ai/groq.js');
 const backups = await import('./core/auto-backup.js');
 const tts = await import('./modules/voice/tts.js');
+const vision = await import('./brain/vision.js');
 const greeting = await import('./brain/greeting.js');
 const weather = await import('./modules/weather/weather.js');
 await (await import('./commands/loader.js')).loadCustomCommands();
@@ -42,7 +43,7 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
   'Permissions-Policy': 'microphone=(self), camera=(), geolocation=()',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
 };
 
 function send(res, status, body, headers = {}) {
@@ -128,15 +129,16 @@ function serveStatic(req, res, url) {
 
 // ---- SSE: eventos do servidor em tempo real para a interface ----
 /** Processa uma mensagem do usuário dentro da sua conversa (memória da conversa + registro). */
-async function runInput(body, onToken = null) {
+async function runInput(body, onToken = null, media = null) {
   const client = body.client && typeof body.client === 'object' ? { mic: String(body.client.mic || '').slice(0, 20), hearing: body.client.hearing !== false, voice: body.client.voice !== false, notifications: String(body.client.notifications || '').slice(0, 20) } : {};
   // Cada conversa tem a sua memória de sessão (a IA lembra o que foi dito nela).
   const chatId = chats.validId(body.chatId) ? body.chatId : chats.newId();
   const sessionKey = `chat-${chatId}`;
   const sess = memory.session(sessionKey);
   if (!sess.history.length) for (const h of chats.historyFor(chatId)) memory.pushHistory(sess, h.role, h.content);
-  const out = await processInput(body.text, { sessionId: sessionKey, pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client, onToken });
-  const chat = chats.append(chatId, String(body.text || '').trim(), out);
+  const out = await processInput(body.text, { sessionId: sessionKey, pageSize: Number(body.pageSize) || 8, source: body.source === 'voice' ? 'voice' : 'text', client, onToken, media });
+  // A conversa salva guarda só a marca da mídia ("📷 imagem"), não a imagem.
+  const chat = chats.append(chatId, media ? `${vision.mediaLabel(media)} ${String(body.text || '').trim()}`.trim() : String(body.text || '').trim(), out);
   return { ...out, chatId, chatTitle: chat?.title || null };
 }
 
@@ -169,6 +171,15 @@ async function api(req, res, url) {
     case 'POST /api/input': {
       if (rateLimited(ip, 'input', 40)) return send(res, 429, { error: 'Muitas requisições. Aguarde um instante.' });
       return send(res, 200, await runInput(await readBody(req)));
+    }
+    // Pergunta com imagem(ns) ou vídeo (quadros + transcrição do áudio), até ~20 MB.
+    case 'POST /api/input/media': {
+      if (rateLimited(ip, 'media', 30)) return send(res, 429, { error: 'Muitos envios seguidos. Aguarde um instante.' });
+      const body = await readBody(req, 22 * 1024 * 1024);
+      let media;
+      try { media = vision.cleanMedia(body.media); } catch (err) { return send(res, err.status || 400, { error: err.message }); }
+      if (!media) return send(res, 400, { error: 'Anexe uma imagem ou um vídeo' });
+      return send(res, 200, await runInput(body, null, media));
     }
     case 'POST /api/input/stream': {
       // Mesma coisa que /api/input, mas a resposta da IA chega aos pedaços (uma linha JSON por evento):
@@ -293,8 +304,8 @@ async function api(req, res, url) {
     case 'POST /api/stt': {
       if (rateLimited(ip, 'stt', 60)) return send(res, 429, { error: 'Muitas transcrições seguidas. Aguarde um instante.' });
       const type = String(req.headers['content-type'] || '');
-      if (!/^audio\//.test(type)) return send(res, 415, { error: 'Envie o áudio (audio/webm, audio/ogg, audio/mp4 ou audio/wav)' });
-      const audio = await readRaw(req, 8 * 1024 * 1024);
+      if (!/^(audio|video)\//.test(type)) return send(res, 415, { error: 'Envie o áudio (audio/webm, audio/ogg, audio/mp4 ou audio/wav) ou um vídeo' });
+      const audio = await readRaw(req, 25 * 1024 * 1024); // vídeo: o Whisper transcreve o áudio dele
       if (audio.length < 1000) return send(res, 200, { text: '', reason: 'áudio curto demais' });
       try {
         const t0 = Date.now();

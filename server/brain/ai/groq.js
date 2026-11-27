@@ -148,7 +148,7 @@ export async function transcribe(buf, mime = 'audio/webm', { language = 'pt', ti
   const k = key();
   if (!k) throw Object.assign(new Error('Groq não conectado (cole a chave em Configurações → INTELIGÊNCIA)'), { status: 503, code: 'NO_KEY' });
   const type = String(mime).split(';')[0] || 'audio/webm';
-  const ext = /ogg/.test(type) ? 'ogg' : /mp4|m4a|aac/.test(type) ? 'm4a' : /wav/.test(type) ? 'wav' : /mpeg|mp3/.test(type) ? 'mp3' : 'webm';
+  const ext = /^video\/(mp4|quicktime)/.test(type) ? 'mp4' : /^video\/webm/.test(type) ? 'webm' : /ogg/.test(type) ? 'ogg' : /mp4|m4a|aac/.test(type) ? 'm4a' : /wav/.test(type) ? 'wav' : /mpeg|mp3/.test(type) ? 'mp3' : 'webm';
   let lastErr;
   for (const model of STT_MODELS()) {
     const fd = new FormData();
@@ -175,4 +175,39 @@ export async function transcribe(buf, mime = 'audio/webm', { language = 'pt', ti
     } finally { clearTimeout(t); }
   }
   throw lastErr || new Error('nenhum modelo de transcrição disponível');
+}
+
+// ---------- VISÃO: imagens (e quadros de vídeo) — modelos Llama 4 do Groq ----------
+export const VISION_MODELS = () => [...new Set([process.env.GROQ_VISION_MODEL, 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean))];
+let visionIds = null;
+let visionAt = 0;
+async function visionCandidates() {
+  if (visionIds === null || Date.now() - visionAt > 6 * 3600e3) {
+    try { const ids = await listModels(key(), 5000); visionIds = VISION_MODELS().filter((m) => ids.includes(m)); visionAt = Date.now(); } catch { return VISION_MODELS(); }
+  }
+  return visionIds.length ? visionIds : [];
+}
+export const resetVision = () => { visionIds = null; };
+
+/**
+ * Responde sobre imagens. `images` = data URLs (jpeg/png/webp), no máximo 5.
+ * `history` = mensagens anteriores (texto) para responder "de acordo com a conversa".
+ */
+export async function seeImages({ system, history = [], text, images, maxTokens = 1200, timeoutMs = 60000 }) {
+  if (!key()) throw Object.assign(new Error('Groq não conectado'), { status: 503, code: 'NO_KEY' });
+  const models = await visionCandidates();
+  if (!models.length) throw Object.assign(new Error('a sua conta do Groq não tem modelo que enxerga imagens agora'), { status: 503, code: 'NO_VISION' });
+  const content = [{ type: 'text', text }, ...images.slice(0, 5).map((url) => ({ type: 'image_url', image_url: { url } }))];
+  let lastErr;
+  for (const model of models) {
+    try {
+      const out = await chatCompletion({ endpoint: `${GROQ_BASE}/chat/completions`, key: key(), model, system, messages: [...history, { role: 'user', content }], maxTokens, timeoutMs });
+      return { ...out, model };
+    } catch (err) {
+      lastErr = err;
+      if ((err.status === 404 || err.status === 400) && /model/i.test(err.message)) { visionIds = null; continue; }
+      throw err;
+    }
+  }
+  throw lastErr;
 }

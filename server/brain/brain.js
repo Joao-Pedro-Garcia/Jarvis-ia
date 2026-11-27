@@ -12,6 +12,7 @@ import { detectTone, detectDomain, emergencyText } from './tone.js';
 import { getPersonality, systemPrompt } from './personality.js';
 import * as llm from './llm.js';
 import * as autoMemory from './auto-memory.js';
+import * as vision from './vision.js';
 import { localReply, getMode, clearMode, socialReply } from './local-mind.js';
 import * as tasks from '../modules/tasks/tasks.js';
 import { normalizeInput, resolveIntent, dispatch, handlePending, moduleResult, speechFrom, speechLimit, getRecentCommands } from './orchestrator.js';
@@ -146,21 +147,26 @@ export function modeOf(result, tone) {
  * @param {string} raw
  * @param {{sessionId?:string, pageSize?:number, source?:'voice'|'text', client?:object}} opts
  */
-export async function processInput(raw, { sessionId = 'default', pageSize = 8, source = 'text', client = {}, onToken = null } = {}) {
+export async function processInput(raw, { sessionId = 'default', pageSize = 8, source = 'text', client = {}, onToken = null, media = null } = {}) {
   const started = Date.now();
   const sess = memory.session(sessionId);
   const settings = getSettings();
   const text = String(raw || '').trim().slice(0, 2000);
-  if (!text) return { text: '', speech: '', success: false };
+  if (!text && !media) return { text: '', speech: '', success: false };
   bus.emitEvent(source === 'voice' ? EVENTS.VOICE_RECEIVED : EVENTS.TEXT_RECEIVED, { length: text.length });
   log.info('cerebro', `Entrada recebida (${source}, ${text.length} caracteres)`); // conteúdo não é registrado
-  memory.pushHistory(sess, 'user', text);
+  memory.pushHistory(sess, 'user', media ? `${text} [${vision.mediaLabel(media)} enviado]`.trim() : text);
   sess.lastRaw = text;
   const norm = normalizeInput(text, getPersonality().nome);
   const ctx = { sess, pageSize, settings, source, client, confirmed: false, onToken };
 
-  let result = await handlePending(norm, ctx);
-  if (!result) {
+  // Imagem/vídeo anexado: a pergunta é sobre a mídia (não vira comando).
+  let result = null;
+  if (media) {
+    const v = await vision.answer(text, media, sess);
+    result = moduleResult({ intent: 'conversation.vision', module: 'VISÃO', success: v.ok, text: v.text, message: v.text, source: v.source });
+  } else result = await handlePending(norm, ctx);
+  if (!result && !media) {
     const found = resolveIntent(norm, sess);
     if (found) { sess.context.awaiting = null; result = await dispatch(found, ctx); }
     else if (sess.context.awaiting === 'task.text') result = createAwaitedTask(text, sess);
