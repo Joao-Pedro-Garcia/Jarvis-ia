@@ -136,6 +136,9 @@ export const HELP_TEXT = [
   '✅ Tarefas — "me lembra de estudar às 19h", "minhas tarefas", "concluí essa", "adia para amanhã"',
   '🧠 Memória — "lembre que…", "o que você lembra sobre…", "esqueça isso"',
   '🗓 Rotina — "meu dia"',
+  '⏰ Agenda — "todo dia às 7h me lembre de…", "de segunda a sexta às 6h30 me dê as notícias", "minhas rotinas"',
+  '📱 Celular — "me acorda às 6h30", "como está a bateria?", "liga a lanterna"',
+  '📎 Imagens e vídeos — toque no 📎, escolha a foto/print/vídeo e pergunte',
   '🌤 Clima — "como está o dia hoje?", "vai chover?", "previsão para amanhã"',
   '🏠 Casa — "ligar a luz da sala" (requer Home Assistant)',
   '🔧 Engenharia — "15% de 230", "converter 10 km em milhas", "12 volts e 4 ohms"',
@@ -149,7 +152,7 @@ registerCommand({
   aliases: ['Ajuda', 'O que você consegue fazer?'],
   patterns: [/^(ajuda|help|comandos|me ajuda com os comandos|socorro com os comandos)$/, /\b(o que voce (sabe|consegue|pode) fazer|quais (sao )?(os )?(seus )?comandos|lista de comandos|me mostra os comandos|como (eu )?uso voce)\b/],
   action: async () => say(`Principais comandos:\n${HELP_TEXT.join('\n')}`, {
-    speech: 'Posso cuidar da sua leitura da Bíblia, notícias, tarefas e lembretes, memória, rotina do dia, engenharia, motores e a casa. Também respondo a status, diagnóstico e silêncio. A lista está na tela.',
+    speech: 'Posso cuidar da sua leitura da Bíblia, notícias, clima, tarefas, rotinas com horário, despertador, bateria e lanterna, memória, imagens, engenharia, motores e a casa. Também respondo a status, diagnóstico e silêncio. A lista está na tela.',
     data: { commands: HELP_TEXT },
   }),
 });
