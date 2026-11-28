@@ -23,6 +23,12 @@ main() {
       && msg "Atalho criado. Da próxima vez, digite só:  jarvis"
   fi
 
+  # Ligar sozinho quando o celular reiniciar (app gratuito Termux:Boot, da F-Droid, aberto 1 vez)
+  if [ -d "$HOME/.termux/boot" ] && [ ! -e "$HOME/.termux/boot/jarvis.sh" ]; then
+    printf '#!%s/bin/sh\ntermux-wake-lock\nnohup sh "%s/scripts/celular.sh" > "$HOME/jarvis-boot.log" 2>&1 &\n' "${PREFIX:-/data/data/com.termux/files/usr}" "$ROOT" > "$HOME/.termux/boot/jarvis.sh" \
+      && chmod +x "$HOME/.termux/boot/jarvis.sh" && msg "Pronto: o JARVIS vai ligar sozinho quando o celular reiniciar (Termux:Boot)."
+  fi
+
   # 1) Não deixar o Android fechar o Termux
   command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock
 
@@ -36,6 +42,11 @@ main() {
   if ! command -v espeak >/dev/null 2>&1 && ! command -v espeak-ng >/dev/null 2>&1 && command -v pkg >/dev/null 2>&1; then
     msg "Instalando a voz masculina offline de reserva (eSpeak)…"
     pkg install -y espeak >/dev/null 2>&1 || msg "Não consegui instalar o eSpeak agora (sem internet?)."
+  fi
+
+  # Comandos do celular (bateria, lanterna): pacote termux-api (precisa também do app Termux:API)
+  if ! command -v termux-battery-status >/dev/null 2>&1 && command -v pkg >/dev/null 2>&1; then
+    pkg install -y termux-api >/dev/null 2>&1 || true
   fi
 
   # 3) IA local (Ollama)

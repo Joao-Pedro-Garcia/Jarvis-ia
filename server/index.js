@@ -420,6 +420,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(ROOT, 'ser
   const { server, protocol } = createServer();
   tasks.startScheduler(Number(process.env.JARVIS_REMINDER_INTERVAL_MS) || 20000);
   backups.startDailyBackup();
+  (await import('./modules/phone/phone.js')).startBatteryWatch(); // aviso de bateria fraca (só com Termux:API)
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n  Já existe um JARVIS ligado na porta ${PORT} (talvez em outra sessão do Termux).\n  Desligue-o com:  pkill -f "node server/index.js"   e ligue de novo com:  jarvis\n`);

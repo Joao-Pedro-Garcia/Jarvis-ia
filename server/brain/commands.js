@@ -7,6 +7,7 @@ import * as reading from '../modules/bible/reading.js';
 import { findReference, refLabel } from '../modules/bible/books.js';
 import * as news from '../modules/news/news.js';
 import * as weather from '../modules/weather/weather.js';
+import * as phone from '../modules/phone/phone.js';
 import * as memory from '../modules/memory/memory.js';
 import * as house from '../modules/house/house.js';
 import { tryMath, formatNumber } from '../modules/engineering/math.js';
@@ -61,6 +62,48 @@ registerCommand({
   aliases: ['Para', 'Silêncio', 'Pare de falar'],
   patterns: [/^(para|pare|parar|silencio|chega|stop|cala a boca|fica quieto|interromp\w*)( de falar| ai| agora)?$/],
   action: async () => say('Ok.', { speech: '', clientActions: ['stopSpeech'] }),
+});
+
+// ======================= CELULAR (Termux) =======================
+const VEHICLE = /\b(carro|moto|veiculo|caminhao|onibus|bateria automotiva)\b/;
+registerCommand({
+  name: 'phone.battery', module: 'CELULAR', priority: 88, description: 'Bateria do celular',
+  aliases: ['Quanto de bateria?', 'Como está a bateria?'],
+  patterns: [(t) => (/\b(bateria|carga do celular|carga do telefone)\b/.test(t) && !VEHICLE.test(t) && !/\b(como funciona|o que e|explica|troca\w*|compr\w*)\b/.test(t) ? [t] : null)],
+  action: async () => {
+    const b = await phone.battery();
+    if (!b.ok) return say(`Não consigo ler a bateria daqui. ${b.help}`);
+    return say(`A bateria está em ${b.percent}%${b.charging ? ', carregando' : ''}.${!b.charging && b.percent <= 20 ? ' Melhor colocar para carregar.' : ''}`);
+  },
+});
+registerCommand({
+  name: 'phone.torch', module: 'CELULAR', priority: 88, description: 'Liga/desliga a lanterna',
+  aliases: ['Liga a lanterna', 'Desliga a lanterna'],
+  patterns: [/\b(lig\w+|acend\w+|abr\w+|deslig\w+|apag\w+|fech\w+) (a |essa )?lanterna\b/, /^(a )?lanterna( on| off)?$/],
+  params: (t) => ({ on: !/\b(deslig\w+|apag\w+|fech\w+|off)\b/.test(t) }),
+  action: async ({ on }) => {
+    const r = await phone.torch(on);
+    return say(r.ok ? (on ? 'Lanterna ligada.' : 'Lanterna desligada.') : `Não consigo mexer na lanterna daqui. ${r.help}`);
+  },
+});
+registerCommand({
+  name: 'phone.alarm', module: 'CELULAR', priority: 86, mutates: true, description: 'Despertador de verdade no relógio do Android',
+  aliases: ['Coloca um despertador para as 6h', 'Me acorda às 6h30'],
+  patterns: [(t) => (/\b(despertador|alarme|me acord\w+|acorda me|acordar as)\b/.test(t) && !/\b(cancel\w+|apag\w+|remov\w+|tira\w*)\b/.test(t) ? [t] : null)],
+  params: (t) => {
+    const d = tasks.parseDays(t);
+    const when = parseWhen(d ? t.replace(d.phrase, ' ') : t);
+    if (!when?.hasTime) return { missing: true };
+    const p = zonedParts(when.date);
+    return { h: p.h, mi: p.mi, days: d?.days || null };
+  },
+  action: async ({ missing, h, mi, days }) => {
+    if (missing) return say('Para que horas? Diga, por exemplo: "coloca um despertador para as 6h30".');
+    const r = await phone.setAlarm(h, mi, 'JARVIS', days);
+    const hh = `${h}h${mi ? String(mi).padStart(2, '0') : ''}`;
+    if (!r.ok) return say(`Não consegui criar o despertador. ${r.help}`);
+    return say(`Despertador pedido ao relógio do celular para as ${hh}${days ? ` (${tasks.describeRepeat({ days, time: `${h}:${String(mi).padStart(2, '0')}` }).replace(/ às .*/, '')})` : ''}. Confira no app Relógio; se não aparecer, permita "Aparecer sobre outros apps" para o Termux nas configurações do Android.`, { speech: `Despertador pedido para as ${hh}. Confira no app Relógio.` });
+  },
 });
 
 registerCommand({

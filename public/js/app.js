@@ -827,6 +827,7 @@ async function boot() {
     if (evt.type === 'AI_BENCHMARK_START' && evt.payload?.auto) addMsg('system', '⚙ Ajustando a velocidade da IA ao seu aparelho (só na primeira vez, cerca de 1 minuto). Enquanto isso, as respostas da IA podem demorar.');
     if (evt.type === 'AI_BENCHMARK_DONE' && evt.payload?.text) { addMsg('jarvis', evt.payload.text, { tag: 'SISTEMA' }); if (evt.payload.speech) say(evt.payload.speech); }
     if (evt.type === 'MEMORY_UPDATED') refreshMemoryMini();
+    if (evt.type === 'BATTERY_LOW') { const t = `🔋 Bateria em ${evt.payload?.percent}%. Coloque o celular para carregar (sem bateria o JARVIS desliga).`; addMsg('system', t); notify('JARVIS — Bateria fraca', t).catch(() => {}); if (!asleep) say(`Bateria em ${evt.payload?.percent} por cento. Coloque para carregar.`); }
     if (evt.type === 'MEMORY_LEARNED' && evt.payload?.items?.length) { addMsg('system', `🧠 Anotei: ${evt.payload.items.join(' · ')}`); refreshMemoryMini(); }
     if (['MEMORY_UPDATED', 'BIBLE_DAY_COMPLETED', 'NEWS_FETCHED', 'HOUSE_ACTION', 'LLM_ERROR'].includes(evt.type)) refreshStatus();
   });

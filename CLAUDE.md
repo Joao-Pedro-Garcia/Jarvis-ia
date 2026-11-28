@@ -24,7 +24,7 @@ Documentos mais antigos e detalhados: `JARVIS_STATUS.md` (o que funciona/limitad
 
 ## Como rodar e testar
 - `npm start` (servidor em :3000). No celular: `sh scripts/celular.sh` ou o atalho `jarvis`.
-- `npm test` → testes unitários (node:test) — hoje **330 passando**.
+- `npm test` → testes unitários (node:test) — hoje **335 passando**.
 - E2E com navegador real: `NODE_PATH=$(npm root -g) node tests/e2e/run-e2e.js` → **34 etapas**.
   (o E2E usa microfone falso com palmas gravadas a cada 6 s e simula fala/síntese)
 - Este ambiente de desenvolvimento **não tem internet** (Groq, Gemini, Edge, Open-Meteo bloqueados):
@@ -65,6 +65,8 @@ Documentos mais antigos e detalhados: `JARVIS_STATUS.md` (o que funciona/limitad
   Araguaína-TO, notícias/câmbio/combustíveis, Bíblia (ACF local, plano diário), conversas estilo ChatGPT.
 
 ## Histórico recente (mais novo primeiro)
+- Celular: despertador real no app Relógio (`am`), bateria/lanterna (Termux:API) com aviso de bateria fraca,
+  Termux:Boot (o `jarvis` cria `~/.termux/boot/jarvis.sh`). Testado com programas falsos no PATH.
 - Palmas no Android: microfone exclusivo; "Jarvis" via Whisper pelo mesmo microfone; religar com tentativas.
 - Visão: procura modelo de visão na conta Groq (teste de 1 pixel); Gemini de reserva com troca de modelo em 503;
   chave colada com lixo/formato "AQ." aceita; foto copiada na escolha; HEIC vai direto ao Gemini.
@@ -73,6 +75,7 @@ Documentos mais antigos e detalhados: `JARVIS_STATUS.md` (o que funciona/limitad
 
 ## Pendências / próximos passos possíveis
 - Confirmar no celular real: visão pelo Gemini respondendo; palmas acordando após calibrar; "Jarvis" pelo Whisper.
-- Sugestões já oferecidas e ainda não feitas: controlar o celular pelo **Termux:API** (lanterna, bateria, alarme,
-  SMS com confirmação), **Termux:Boot** (iniciar sozinho), ativação offline por **Vosk**.
+- Usuário precisa instalar (F-Droid) **Termux:API** e **Termux:Boot** e abri-los uma vez para bateria/lanterna/ligar sozinho.
+- Ainda não feito: SMS com confirmação, ativação offline por **Vosk**.
+- Usuário estava sem conseguir abrir console.groq.com ("Algo deu errado" — provável tradução do Chrome).
 - O usuário relatou "a Bíblia parou de funcionar" sem detalhes; nos testes ela funciona — pedir print se voltar.

@@ -119,6 +119,13 @@ e no comando “voz masculina”). Opções extras em Configurações → VOZ: *
 serviço não oficial do Edge — no teste real no celular foi recusada com HTTP 403) e *voz robótica offline*
 (eSpeak, `pkg install espeak`).
 
+### Celular: bateria, lanterna, despertador e ligar sozinho
+- “**Me acorda às 6h30**”, “coloca um despertador de segunda a sexta às 5h” → cria o alarme no **app Relógio**
+  (comando `am` do Termux; se não aparecer, permita “Aparecer sobre outros apps” para o Termux).
+- “**Como está a bateria?**”, “**liga/desliga a lanterna**” e aviso automático de **bateria fraca** (≤ 15%) —
+  precisam do app gratuito **Termux:API** (F-Droid); o `jarvis` instala o pacote `termux-api` sozinho.
+- **Ligar sozinho** quando o celular reiniciar: instale o app **Termux:Boot** (F-Droid), abra uma vez e rode `jarvis`.
+
 ### Agenda · memória automática · pesquisa na internet · backup
 - **Agenda** (menu ⏰ ou voz): “todo dia às 7h me lembre de tomar o remédio”, “de segunda a sexta às 6h30 me dê
   as notícias”, “toda segunda e quarta às 18h academia”. Ações: lembrete, notícias, clima, meu dia, Bíblia, dólar,
